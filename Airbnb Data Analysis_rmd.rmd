@@ -1,0 +1,931 @@
+---
+title: "Untitled"
+author: "POONAM PRAFUL SHRISHRIMAL_s8075211"
+date: "2023-11-08"
+output:
+  html_document:
+    df_print: paged
+---
+
+### 1.INTRODUCTION ###
+
+<div style="text-align: justify">
+*Airbnb is an online marketplace since 2008 that facilitates connections between hosts and guests globally, resulting in extensive data. Analyzing this data is essential for making informed decisions and driving improvement in various areas. This research centers on Airbnb's dataset specific to NYC, offering insights into property specifics, pricing, and additional aspects. The goals involve examining trends, exploring pricing influencers, and constructing predictive models for rental prices and occupancy rates.*
+</div>
+
+
+```{r}
+#Stop / hide warnings
+options(warn = -1)
+```
+
+
+```{r}
+#Import required libraries
+
+library(tidyverse)
+library(tidymodels)
+library(scales)
+library(stacks)
+library(ggplot2)
+library(dplyr)
+library(tidytext)
+library(textrecipes)
+library(baguette)
+library(naniar)
+library(corrplot)
+library(DT)
+library(doParallel)
+registerDoParallel()
+```
+
+```{r}
+library(yardstick)
+```
+
+
+```{r}
+#Import the given dataset
+airbnb_dataset=read.csv ("E:/VU SYDNEY/BCO6008 PREDICTIVE ANALYTICS/ASSESSMENT2/train.csv")
+```
+
+
+
+### 2.DATA WRANGLING ###
+
+<div style="text-align: justify">
+*Data wrangling encompasses managing missing or inconsistent data, converting data types, transformation and resolving other issues to ensure the data is ready for in-depth exploration and modeling.*
+</div>
+
+
+
+#### 2.1 INITIAL EXPLORATION ####
+
+```{r}
+#Lets take a glance at data and its type
+glimpse(airbnb_dataset)
+```
+
+<div style="text-align: justify">
+*The dataset comprises 16 features and a total of 34,226 data points, featuring diverse datatypes such as characters, integers, and floats. Notably, room type and neighborhood group, though fundamentally categorical, are assigned the character datatype, which may not be optimal for their representation.*
+</div>
+
+
+```{r}
+# Check if there are any duplicate rows
+any(duplicated(airbnb_dataset))
+```
+
+
+<div style="text-align: justify">
+* No duplicate values!*
+</div>
+
+
+```{r}
+#Checking Null values
+apply(airbnb_dataset,2,function(x) sum(is.na(x))) 
+```
+
+
+<div style="text-align: justify">
+*The above shows there exists null values in the dataset especially the reviews per month and last review.*
+</div>
+
+
+
+#### 2.2 Handling Data Types ####
+
+<div style="text-align: justify">
+Handling data types ensures that your data is in a format suitable for analysis, modeling, and interpretation, ultimately contributing to the accuracy and reliability of your findings.
+
+```{r}
+
+#Convert character to factor 
+names_to_factor <- c("neighbourhood_group", "room_type")
+airbnb_dataset[names_to_factor] <- map(airbnb_dataset[names_to_factor], as.factor)
+```
+
+
+#### 2.3 HANDLING MISSING VALUES ####
+
+
+<div style="text-align: justify">
+*Handling missing values is crucial for maintaining data quality, ensuring accurate analyses, and making informed decisions. It can be addressed by either removing them, filling in with appropriate values, or using statistical methods to impute. It depends the variable importance and percentage of missing.*
+</div>
+
+
+```{r}
+#Replace the null values in reviews per month by mean i.e., Mean imputation
+
+airbnb_dataset$reviews_per_month[is.na(airbnb_dataset$reviews_per_month)] <- mean(airbnb_dataset$reviews_per_month, na.rm = TRUE)
+summary(airbnb_dataset$reviews_per_month)
+```
+
+
+
+```{r}
+#Checking NULL Values
+apply(airbnb_dataset,2,function(x) sum(is.na(x))) 
+```
+
+
+
+```{r}
+# Remove null values from specific columns
+
+cols_to_clean <- c("name", "host_name")
+airbnb_dataset <- airbnb_dataset[complete.cases(airbnb_dataset[cols_to_clean]), ]
+```
+
+
+
+```{r}
+#Check null values again
+apply(airbnb_dataset,2,function(x) sum(is.na(x))) 
+```
+<div style="text-align: justify">
+*The above shows last review still have 6998 values, will keep that column as it is for now.*
+</div>
+
+
+
+#### 2.4 Identifying and dealing with outliers ###
+
+<div style="text-align: justify">
+*Outliers are data points that deviate significantly from the majority of the data in a dataset. Handling outliers carefully is crucial to obtaining accurate and reliable insights from the data.*
+</div>
+
+
+```{r}
+
+# Check the structure of dataset
+str(airbnb_dataset)
+
+# Extract numeric columns
+numeric_columns <- airbnb_dataset[sapply(airbnb_dataset, is.numeric)]
+
+# Calculate summary statistics for numeric columns
+summary_stats <- summary(numeric_columns)
+
+# Display the summary statistics
+print(summary_stats)
+
+```
+
+
+```{r}
+
+# Box plot for price
+boxplot(airbnb_dataset$price, 
+        main = "Box Plot - Price",
+        xlab = "Price",
+        notch = TRUE,         # Add a notch to the box plot for quartiles
+        outcol = "blue",      # Color outliers in blue
+        horizontal = TRUE     # Create a horizontal box plot
+
+)
+
+```
+
+
+<div style="text-align: justify">
+*The above boxplot shows presence of outliers but it should not be considered as outliers as the luxury properties can have higher rental price.*
+</div>
+
+
+```{r}
+
+# Box plot for minimum nights
+boxplot(airbnb_dataset$minimum_nights, 
+        main = "Box Plot - Minimum nights",
+        xlab = "minimum nights",
+        notch = TRUE,         # Add a notch to the box plot for quartiles
+        outcol = "red",      # Color outliers in blue
+        horizontal = TRUE     # Create a horizontal box plot
+)
+
+```
+
+
+<div style="text-align: justify">
+*The box plot above shows presence of outliers as minimum nights can't be say 200, 400 , 1200 etc. This needs to be taken care of as below.*
+</div>
+
+
+```{r}
+# Creating a function to remove the outliers from our data
+
+rm_outliers = function(x){
+  
+  uc1 = quantile(x, probs = 0.95, na.rm = TRUE)
+  lc1 = quantile(x, probs = 0.05, na.rm = TRUE)
+  
+  x[x > uc1] = uc1
+  x[x < lc1] = lc1
+  
+  return(x)
+  
+}
+
+# Removing outliers from the variable "minimum_nights"
+airbnb_dataset$minimum_nights = as.numeric(sapply(airbnb_dataset["minimum_nights"], rm_outliers))
+
+summary(airbnb_dataset$minimum_nights)
+```
+
+
+```{r}
+glimpse(airbnb_dataset)
+```
+
+
+
+#### 2.5 DATA NORMALIZATION / STANDARIZATION ####
+
+
+<div style="text-align: justify">
+*Data normalization or standardization is necessary to ensure accurate and fair analysis. Both normalization and standardization help in bringing numerical features to a comparable scale, preventing features with larger magnitudes from dominating the analysis.*
+</div>
+
+
+```{r}
+
+#creating a theme for the plot
+
+cleanup <- theme(panel.grid.major = element_blank(),
+                 panel.grid.minor = element_blank(), 
+                 panel.background = element_blank(), 
+                 axis.line.x = element_line(color = 'black'), 
+                 axis.line.y = element_line(color = 'black'), 
+                 legend.key = element_rect(fill = 'white'), 
+                 text = element_text(size = 15)) 
+```
+
+
+```{r}
+#Distribution of price
+par(mfrow=c(2,1))
+ggplot(airbnb_dataset) + 
+  cleanup+
+  geom_histogram(aes(price),fill = 'orange',alpha = 0.85,binwidth = 15) + 
+  theme_minimal(base_size = 13) + xlab("Price") + ylab("Frequency") + 
+  ggtitle("The Distrubition of Price") 
+```
+
+
+```{r}
+#Transformed distribution of Price
+ggplot(airbnb_dataset, aes(price)) +
+  cleanup+
+  geom_histogram(bins = 30, aes(y = ..density..), fill = "orange") + 
+  geom_density(alpha = 0.2, fill = "orange") +ggtitle("Transformed distribution of price",
+  subtitle = expression("With" ~'log'[10] ~ "transformation of x-axis")) + scale_x_log10()
+```
+
+
+### 3. EXPLORATORY DATA ANALYSIS ###
+
+
+<div style="text-align: justify">
+*Exploratory Data Analysis employs statistical graphics, charts, and summary metrics to delve into the data, recognize patterns, anomalies, and correlations among variables. EDA is indispensable because it facilitates a profound comprehension of the dataset, yielding valuable insights.*
+</div>
+
+
+```{r}
+#location of airbnb rooms using coordinates longitude and latitude
+ggplot(airbnb_dataset, aes(latitude, longitude, color = neighbourhood_group)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  labs(title = "Coordinates of rooms according to the Neighbourhood Group",
+       x = "Latitude",
+       y = "Longitude",
+       color = "Neighbourhood Group")
+```
+
+
+```{r}
+#Most expensive neighbourhoods
+
+airbnb_dataset %>%
+  group_by(neighbourhood_group,neighbourhood)%>%
+  summarise(mean_price = mean(price))%>%
+  arrange(desc(mean_price))%>%
+  head(15)%>%
+  ggplot(., aes(x = reorder(neighbourhood, -mean_price) , y = mean_price, fill = neighbourhood_group)) +
+  geom_col() +
+  theme_minimal() +
+  geom_text(aes(label = format(mean_price,digits=3)), size=3, position = position_dodge(0.9),vjust = 5) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "right") +
+  labs(title = "Top 15 most expensive Neighbourhoods", 
+       x = "Neighbourhood", 
+       y = "Mean price",
+       fill = "Neighbourhood Group")
+```
+
+
+
+```{r}
+
+#least expensive neighbourhood
+airbnb_dataset %>%
+  group_by(neighbourhood_group,neighbourhood)%>%
+  summarise(mean_price = mean(price))%>%
+  arrange(mean_price) %>%
+  head(15)%>%
+  ggplot(., aes(x = reorder(neighbourhood, mean_price) , y = mean_price, fill = neighbourhood_group)) +
+  geom_col() +
+  theme_minimal() +
+  geom_text(aes(label = format(mean_price,digits=3)), size=2, position = position_dodge(0.9),vjust = 5) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "right") +
+  labs(title = "Top 15 least expensive Neighbourhoods",
+       x = "Neighbourhood", 
+       y = "Mean price",
+       fill = "Neighbourhood Group")
+```
+
+
+```{r}
+#Top20 neighbourhoods by listings
+airbnb_dataset %>%
+  group_by(neighbourhood) %>%
+  dplyr::summarize(num_listings = n(), 
+            borough = unique(neighbourhood_group)) %>%
+  top_n(n = 20, wt = num_listings) %>%
+  ggplot(aes(x = fct_reorder(neighbourhood, num_listings), 
+             y = num_listings, fill = borough)) +
+  geom_col() +
+  coord_flip() +
+  theme(legend.position = "bottom") +
+  labs(title = "Top 20 neighborhoods by no. of listings",
+       x = "Neighborhood", y = "No. of listings")+theme_minimal()
+```
+
+
+```{r}
+airbnb_dataset %>%
+  ggplot(., aes(x = room_type, y = availability_365, color = room_type)) +
+  geom_jitter() +
+  theme_minimal() +
+  theme(legend.position="bottom", plot.title = element_text(vjust = 0.5)) + 
+  labs(title = "Availability of Room Types",
+       x = "Room Type",
+       y = "Availability", 
+       color = " ") 
+```
+
+
+```{r}
+# Calculate the number of listings for each host and select the top 10 hosts
+top_10_listing_counts = airbnb_dataset %>%
+  group_by(host_id) %>%
+  summarise(listing_count = n()) %>%
+  arrange(desc(listing_count)) 
+
+# Create a data frame with distinct host IDs and host names
+id_name = distinct(airbnb_dataset[, c("host_id", "host_name")])
+
+# Combine the top hosts with their names using a left join
+top_10_listing_counts[1:10, ] %>%
+  left_join(., id_name, by = "host_id") %>%
+  
+# Create a bar chart to visualize the top hosts and their listing counts
+  ggplot(., aes(x = reorder(host_name, -listing_count) , y = listing_count, fill = host_name)) +
+  geom_col() +
+  theme_minimal() +
+  geom_text(aes(label = format(listing_count,digits=3)), size=2, position = position_dodge(0.9),vjust = 2) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "right") +
+  labs(title = "Top 10 Hosts in NYC",
+       x = "Host Names", 
+       y = "Listing Counts",
+       fill = "Host Name")
+```
+
+
+<div style="text-align: justify">
+*The EDA study highlights Manhattan as the most expensive neighborhood, contrasting with the least expensive, Bronx. It explores room type preferences, with entire home/apt being the most favored. The examination of number of reviews reveals Bronx and Staten Island have fewer reviews. Visualizations identify Fort Woodrow as the priciest neighborhood and Bull's Head as the most budget-friendly. Manhattan and Staten Island host the highest-priced rooms, while Bronx and Staten Island have the least expensive. Notably, no rooms from Manhattan are among the least expensive*
+</div>
+
+
+
+### 4. CORRELATION ANALYSIS ###
+
+
+<div style="text-align: justify">
+*Correlation analysis is a crucial step in data analysis as it helps us to understand the relationship between two or more variables in a dataset. This understanding influence decisions in modeling and offers valuable insights for making well-informed choices.*
+</div>
+
+
+```{r}
+pricing_correlation <- airbnb_dataset %>%
+  select(price, minimum_nights, number_of_reviews, reviews_per_month, calculated_host_listings_count, latitude, longitude, availability_365) %>%
+  rename(n_listings_owned_by_host = calculated_host_listings_count)
+
+pricing_corr_calc <- cor(pricing_correlation, use = "complete.obs")
+pricing_corr_calc <- round(pricing_corr_calc, 2)
+```
+
+
+
+```{r}
+## corrplot 
+corrplot(pricing_corr_calc, tl.col = "black")
+```
+
+
+```{r}
+# Randomly sample 2000 rows from the 'airbnb_dataset'
+sampled_data <- airbnb_dataset %>% sample_n(2000)
+
+# Create a scatterplot
+scatterplot <- sampled_data %>% ggplot(aes(minimum_nights, log(price)))
+
+# Add a logarithmic scale to the x-axis (minimum_nights)
+scatterplot <- scatterplot + scale_x_log10()
+
+# Add individual data points to the plot
+scatterplot <- scatterplot + geom_point()
+
+# Add a smoothed curve using the LOESS (Locally Weighted Scatterplot Smoothing) method
+scatterplot <- scatterplot + geom_smooth(method = "loess")
+
+# Display the final scatterplot
+scatterplot
+
+```
+
+
+```{r}
+# Create a scatterplot
+scatterplot <- airbnb_dataset %>% ggplot(aes(availability_365, log(price)))
+
+# Add a logarithmic scale to the x-axis (availability_365)
+scatterplot <- scatterplot + scale_x_log10()
+
+# Add individual data points to the plot
+scatterplot <- scatterplot + geom_point()
+
+# Add a linear regression line to visualize the relationship
+scatterplot <- scatterplot + geom_smooth(method = "lm")
+
+# Display the final scatterplot
+scatterplot
+
+```
+
+
+```{r}
+# Define a function named 'summarize_prices' that takes a data frame 'tbl' as input
+summarize_prices <- function (tbl) {
+  
+  # Calculate and summarize statistics for the 'price' variable in the input data frame
+  
+  # Use the summarize function to compute summary statistics
+  tbl %>%
+    summarize(
+      # Calculate and exponentiate the geometric mean of 'price' (avg_price)
+      avg_price = exp(mean(price)),
+      
+      # Calculate and exponentiate the geometric median of 'price' (median_price)
+      median_price = exp(median(price)),
+      
+      # Count the number of observations in the data frame (n)
+      n = n()
+    ) %>%
+    
+    # Arrange the results in descending order based on the count of observations (n)
+    arrange(desc(n))
+}
+
+```
+
+
+
+```{r}
+#summarize statistics for the 'price' variable in the 'airbnb_dataset' data frame for each unique host.
+airbnb_dataset %>% 
+  group_by(host_id)%>%
+  summarize_prices()
+```
+
+
+```{r}
+#Plot number of reviews and price to view the relation
+ggplot(airbnb_dataset, aes(number_of_reviews, price)) +
+  theme(axis.title = element_text(), axis.title.x = element_text()) +
+  geom_point(aes(size = price), alpha = 0.05, color = "blue") +
+  cleanup+
+  xlab("Number of reviews") +
+  ylab("Price") +
+  ggtitle("Relationship between price and number of reviews")
+```
+
+
+```{r}
+# Create a scatterplot using ggplot2
+scatterplot <- airbnb_dataset %>% ggplot(aes(latitude, log(price)))
+
+# Add a logarithmic scale to the x-axis (latitude)
+scatterplot <- scatterplot + scale_x_log10()
+
+# Add individual data points to the plot
+scatterplot <- scatterplot + geom_point()
+
+# Add a linear regression line to visualize the relationship
+scatterplot <- scatterplot + geom_smooth(method = "lm")
+
+# Display the final scatterplot
+scatterplot
+
+```
+
+```{r}
+#create a map showing the mean price in each area
+airbnb_dataset %>%
+  ggplot(aes(longitude, latitude, color = log(price))) +
+  geom_point(alpha = 0.2) +
+  scale_color_viridis_c()
+```
+
+
+```{r}
+#create a map with hex bins showing the mean price in each area.
+airbnb_dataset %>%
+  ggplot(aes(longitude, latitude, z = log(price))) +
+  stat_summary_hex(alpha = 0.8, bins = 70) +
+  scale_fill_viridis_c() +
+  labs(fill = "Mean price (log)")
+```
+
+
+
+```{r}
+#Plot a histogram to visualize the distribution of prices per night based on the neighborhood group
+
+airbnb_dataset %>%
+  ggplot(aes(price, fill = neighbourhood_group)) +
+  geom_histogram(position = "identity", alpha = 0.5, bins = 20) +
+  scale_x_log10(labels = scales::dollar_format()) +
+  labs(fill = NULL, x = "price per night")+theme_minimal()
+```
+
+```{r}
+# Calculate quantiles (percentiles) of the 'price' variable
+quant = quantile(airbnb_dataset$price, seq(0, 1, 0.2))
+
+# Create a new variable 'price_group' in the dataset based on quantiles
+airbnb_price_group = airbnb_dataset %>%
+  mutate(price_group = case_when(
+    price < quant[2] ~ "Very Low",
+    price < quant[3] ~ "Low",
+    price < quant[4] ~ "Medium",
+    price < quant[5] ~ "High",
+    TRUE ~ "Very High"
+  )) %>%
+# Convert 'price_group' into a factor variable with predefined levels
+  mutate(price_group = factor(price_group, levels = c("Very Low", "Low", "Medium", "High", "Very High")))
+
+# Create a scatterplot to visualize the price groups on a map
+airbnb_price_group %>%
+  ggplot(., aes(latitude, longitude, color = price_group)) +
+  geom_point() +
+  theme_minimal() +
+  facet_wrap(~neighbourhood_group, scales = "free") +
+  labs(title = "Spread of the price group in each Neighborhood Group",
+       x = "Latitude",
+       y = "Longtitude",
+       color = "Price Group") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+# Create a series of box plots to analyze the distribution of prices for different room types in various neighborhood groups
+
+ggplot(airbnb_dataset, aes(x = room_type, y = price, fill = room_type)) + scale_y_log10() + 
+  geom_boxplot() +
+  theme_minimal() +
+  labs (x="", y= "Price") +
+  facet_wrap(~neighbourhood_group) +
+  facet_grid(.~ neighbourhood_group) +
+  theme(axis.text.x = element_text(angle = 90), legend.position = "right") +
+  labs(title = "Room Type analysis of Neighborhood Groups",
+       fill = "Room Type") 
+```
+
+
+```{r}
+# Tokenize the 'name' column of 'airbnb_dataset' into individual words
+# and create a new column named 'word' to store these words
+tokenized_data <- airbnb_dataset %>% unnest_tokens(word, name)
+
+# Group the data by the 'word' column
+grouped_data <- tokenized_data %>% group_by(word)
+
+# Calculate and summarize statistics for each word, potentially related to average prices
+summarized_data <- summarize_prices(grouped_data)
+
+# Select the top 30 words with the highest counts
+top_30_words <- head(summarized_data, 30)
+
+# Reorder the 'word' factor based on the logarithm of average prices
+top_30_words <- top_30_words %>%
+  mutate(word = fct_reorder(word, log(avg_price)))
+
+# Create a scatterplot to visualize the relationship between the logarithm of average prices,
+# word frequencies, and the size of points representing word counts
+word_frequency_plot <- ggplot(top_30_words, aes(log(avg_price), word, size = n)) + geom_point()
+
+word_frequency_plot
+```
+
+
+<div style="text-align: justify">
+*The correlation study shows a slight positive correlation between price and minimum nights, while indicates a very slight or flat correlation availability 365 . A plot highlights a negative correlation between expensive objects and number of reviews. Geographically, Manhattan exhibits concentrated high prices, contrasting with more evenly spread prices in Bronx, Brooklyn, Queens, and Staten Island. Overall, price shows a clear connection to geography. Also, it reveals a relation between words and price, indicating a word's impact on pricing..=*
+</div>
+
+
+### 5. FEATURE SELECTION ###
+<div style="text-align: justify">
+*This thorough correlation and exploratory data analysis (EDA) indicate a strong association between price and geographic factors, prompting the inclusion of geography-related features such as room type, neighborhood, longitude, and latitude. The recognition of this connection suggests that these variables significantly contribute to the pricing dynamics and are essential for a comprehensive model.*
+
+*Additionally, while variables like minimum nights and number of reviews exhibit a relatively subtle relationship with price, their inclusion is deemed valuable. Despite the modest correlation, these variables might contribute meaningfully to the overall predictive power of the model, enhancing its accuracy and capturing nuanced patterns in the data* 
+
+*Furthermore, the analysis underscores the impact of linguistic aspects in variable names on price, suggesting a unique dimension for model development.* 
+
+*In summary, the chosen variables are justified based on their demonstrated correlations with price.*
+</div>
+
+
+
+### 6.MODELING ###
+
+
+#### 6.1 DATA PREPARATION ####
+
+
+```{r}
+
+# Set a seed for reproducibility (optional)
+# It ensures consistency in the randomization processes for cross-validation
+set.seed(123)
+
+# Perform an initial data split into training and testing sets
+nyc_split <- airbnb_dataset %>%
+  mutate(price = log(price + 1)) %>%
+  initial_split(strata = price)
+
+# Extract the training set from the split
+nyc_train <- training(nyc_split)
+
+# Extract the testing set from the split
+nyc_test <- testing(nyc_split)
+
+# Set a new seed for reproducibility 
+set.seed(234)
+
+# Create cross-validation folds for model assessment
+nyc_folds <- vfold_cv(nyc_train, v = 5, strata = price)
+
+# Display information about the cross-validation folds
+nyc_folds
+```
+
+
+<div style="text-align: justify">
+*The code snippet "nyc_folds <- vfold_cv(nyc_train, v = 5, strata = price)" creates a set of five cross-validation folds to assess the performance of machine learning models using the training data. Cross-validation is a crucial technique for gauging a model's ability to generalize to new data, preventing overfitting, optimizing hyperparameters, and ensuring reliable model assessment. The 'strata = price' inclusion in the code ensures that each fold maintains a similar distribution of the 'price' variable, particularly beneficial when dealing with datasets having uneven target variable distributions. These cross-validation folds enhance the accuracy of performance estimation by subjecting the model to testing on multiple training data subsets.*
+</div>
+
+
+
+#### 6.2 MODELING APPROACH ####
+
+
+##### 6.2.1 BAGGED TREE MODEL #####
+
+<div style="text-align: justify">
+*Bagging, short for Bootstrap Aggregating, involves training multiple decision tree models on different subsets of the training data created through bootstrapping (sampling with replacement).*
+</div>
+
+###### 6.2.1.1 MODEL BUILDING ######
+
+```{r}
+
+#creating a data pre-processing recipe using 'tidymodels' framework
+
+nyc_rec <-
+  recipe(price ~ latitude + longitude + neighbourhood + room_type +
+    minimum_nights + number_of_reviews + availability_365 + name,
+  data = nyc_train
+  ) %>%
+  step_novel(neighbourhood) %>%
+  step_other(neighbourhood, threshold = 0.01) %>%
+  step_tokenize(name) %>%
+  step_stopwords(name) %>%
+  step_tokenfilter(name, max_tokens = 30) %>%
+  step_tf(name)
+
+nyc_rec
+```
+
+<div style="text-align: justify">
+*The data preprocessing steps are crucial for machine learning, specifically in predicting the 'price' variable. The 'step_novel' addresses novel levels in 'neighbourhood,' ensuring the model gracefully handles new values. 'step_other' groups infrequent 'neighbourhood' levels, reducing dimensionality to enhance model efficiency and prevent overfitting. Tokenizing and removing stopwords in the 'name' variable with 'step_tokenize' and 'step_stopwords' aid in processing text data, reducing noise, and improving model performance. Additionally, 'step_tokenfilter' limits tokens in 'name' to manage dimensionality, while 'step_tf' applies term frequency transformation, fundamental for natural language processing. In summary, these preprocessing steps address data quality, prepare text data, and reduce dimensionality, collectively enhancing machine learning model performance and interpretability.*
+</div>
+
+
+
+```{r}
+
+# Set up the bagged decision tree model specification
+bag_spec <-
+  bag_tree(min_n = 10) %>%
+  set_engine("rpart", times = 25) %>%
+  set_mode("regression")
+
+# Create a workflow that combines the model specification with data pre-processing
+bag_wf <-
+  workflow() %>%
+  add_recipe(nyc_rec) %>%
+  add_model(bag_spec)
+
+# Set a seed for reproducibility
+set.seed(123)
+
+# Fit the bagged decision tree model to the training data
+bag_fit <- fit(bag_wf, data = nyc_train)
+
+# Display information about the fitted bagged model
+bag_fit
+```
+
+
+###### 6.2.1.1 MODEL EVALUATION (CUSTOM CENTRIC) ######
+
+```{r}
+# Register the 'doParallel' package for parallel processing
+doParallel::registerDoParallel(cores=4)
+
+# Set a seed for reproducibility
+set.seed(123)
+
+# Perform model resampling on the bagged decision tree model
+bag_rs <- fit_resamples(bag_wf, nyc_folds)
+
+# Collect and summarize evaluation metrics for each resample
+collect_metrics(bag_rs)
+```
+
+
+```{r}
+# Apply the above fitted model to the test data 
+test_rs <- augment(bag_fit, nyc_test)
+```
+
+
+```{r}
+
+#compare the true price values to the predicted price values from the above bagged decision tree model
+
+test_rs %>%
+  ggplot(aes(exp(price), exp(.pred), color = neighbourhood_group)) +
+  geom_abline(slope = 1, lty = 2, color = "black", alpha = 1) +
+  geom_point(alpha = 0.2) +
+  scale_x_log10(labels = scales::dollar_format()) +
+  scale_y_log10(labels = scales::dollar_format()) +
+  labs(color = NULL, x = "True price", y = "Predicted price") +theme_light()
+```
+
+
+```{r}
+#Calculate the Root Mean Square Error (RMSE) for the 'price' variable
+test_rs %>%
+  rmse(price, .pred)
+```
+
+
+
+##### 6.2.2 XGBOOST MODEL #####
+
+<div style="text-align: justify">
+*XGBoost, or eXtreme Gradient Boosting, is an ensemble learning method that combines the power of gradient boosting with regularization techniques.*
+</div>
+
+
+###### 6.2.2.1 MODEL BUILDING ######
+
+```{r}
+#set the metric
+
+mset <-metric_set(rmse)
+
+grid_control <- control_grid(save_pred = TRUE,
+                             save_workflow=TRUE,
+                             extract = extract_model)
+
+set.seed(2021)
+```
+
+
+
+```{r}
+prep_juice <- function(d) juice (prep(d))
+
+xg_rec <- recipe (price ~ minimum_nights + room_type + number_of_reviews + longitude +latitude + neighbourhood_group +reviews_per_month + calculated_host_listings_count +availability_365 + last_review, data = nyc_train) %>% 
+  #step_log(all_numeric_predictors(), offset=1) %>% 
+  step_mutate(last_review = coalesce(as.integer(Sys.Date() - as.Date(last_review)), 0))%>%
+  step_dummy(all_nominal_predictors())
+
+xg_mod <- boost_tree ("regression", 
+                      mtry = tune(), 
+                      trees=tune(), 
+                      learn_rate=0.01) %>% 
+  set_engine("xgboost")
+
+xg_wf<- workflow() %>%
+  add_recipe(xg_rec)%>%
+  add_model(xg_mod)
+
+xg_tune <- xg_wf%>%
+  tune_grid(nyc_folds,
+            metrics=mset,
+            control=grid_control,
+            grid=crossing(mtry=c(3,5,7), trees=seq(250, 500, 25)),
+            workers = 1)
+
+```
+
+
+<div style="text-align: justify">
+*The step_log function, when activated, logarithmically transforms numeric predictors—common for log-scale relationships. The step_mutate function computes days between the current date and last_review, replacing missing values with 0. This is crucial as it converts a date-related variable into a numeric feature, capturing the recency of the last review. Lastly, step_dummy generates dummy variables for nominal predictors, essential for machine learning algorithms like XGBoost, which demand numerical input from categorical data*
+</div>
+
+
+```{r}
+autoplot(xg_tune)
+
+xg_tune %>%
+  collect_metrics()%>%
+  arrange(mean)
+```
+
+
+###### 6.2.2.2 MODEL EVALUATION ######
+
+```{r}
+xg_fit <- xg_wf %>% finalize_workflow(select_best(xg_tune))%>%
+  fit(nyc_train)
+
+xg_fit %>%
+  augment(nyc_test)%>%
+  rmse(price,.pred)
+```
+
+
+```{r}
+doParallel::registerDoParallel(cores=4)
+
+set.seed(123)
+xg_rs <- fit_resamples(xg_fit, nyc_folds)
+collect_metrics(xg_rs)
+```
+
+
+```{r}
+importances <- xgboost::xgb.importance(model=xg_fit$fit$fit$fit)
+
+importances %>%
+  mutate(Feature = fct_reorder(Feature, Gain))%>%
+  ggplot(aes(Gain, Feature))+
+  geom_col()+theme_minimal()
+```
+
+### 6.3 COMPARISION OF MODELS ###
+
+
+```{r}
+# Collect and summarize evaluation metrics for the bagged decision tree model
+bag_metrics <- collect_metrics(bag_rs, metrics = c("mae", "mse", "rmse", "rsquared"))
+
+# Collect and summarize evaluation metrics for the xgboost model
+xg_metrics <- collect_metrics(xg_rs, metrics = c("mae", "mse", "rmse", "rsquared"))
+
+# Display metrics for each model
+print("Bagged  Tree Metrics:")
+print(bag_metrics)
+
+print("XGBoost Metrics:")
+print(xg_metrics)
+
+```
+
+<div style="text-align: justify">
+*In comparing the Bagged Decision Tree and XGBoost models, we examined two key metrics: Root Mean Squared Error (RMSE) and R-squared (R²). The Bagged Decision Tree model demonstrated slightly better performance, with a lower RMSE indicating more accurate predictions and a higher R-squared suggesting a better fit to the data.  Also, from feature importance we can say that the room type is the most contributing feature followed by geographical feature including latitude, longitude and neighbourhood.*
+
+*However, it's important to note that the differences in performance, though present, are not substantial. Additional considerations, such as the interpretability of the models, their computational efficiency, and specific requirements of our use case, should guide our final model selection. While the metrics provide valuable insights into predictive accuracy and model fit, a comprehensive evaluation takes into account a range of factors for a well-informed decision.*
+</div>
+
+
+### 7. CONCLUSION ###
+
+<div style="text-align: justify">
+*In summary, our thorough examination of Airbnb's NYC dataset revealed important trends. Expanding on this, we crafted predictive models, utilizing XGBoost and Bagged Tree methods, to improve rental price forecasts. This not only deepens our understanding of NYC's Airbnb dynamics but also provides stakeholders with potent tools for anticipating and optimizing pricing strategies. The amalgamation of detailed analysis and advanced models places our research at the forefront of informed decision-making in the ever-evolving landscape of Airbnb hosting and accommodations.*
+</div>

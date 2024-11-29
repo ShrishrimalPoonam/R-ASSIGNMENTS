@@ -1,0 +1,1030 @@
+---
+title: "Data Analysis on CEO Dataset"
+output:
+  html_document: default
+  word_document: default
+date: "2023-11-14"
+---
+
+
+```{r}
+#Stop / hide warnings
+options(warn = -1)
+```
+
+
+```{r}
+# Import required libraries
+library(tidyverse)
+library(finetune)
+library(tidytuesdayR)
+library(vip)
+library(tidymodels)
+library(textrecipes)
+library(embed)
+library(themis)
+library(parsnip)
+library(rsample)
+library(doParallel)
+library(ggrepel)
+library(dplyr)
+library(ggplot2)
+library(tidytext) # for tokenization
+library(tidylo)   # for bind_log_odds
+library(broom)
+```
+
+
+
+```{r}
+#mport the dataset
+
+departures_raw <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-04-27/departures.csv", show_col_types=FALSE)
+```
+
+
+DATA WRANGLING:
+
+```{r}
+#explore the dataset
+departures_raw
+```
+
+```{r}
+#Checking Null values
+apply(departures_raw,2,function(x) sum(is.na(x))) 
+```
+
+
+
+```{r}
+# check count for unique departure code
+departures_raw %>% count(departure_code)
+```
+
+
+
+```{r}
+#filter na values
+departures_raw%>% filter (is.na(departure_code))
+```
+
+
+```{r}
+#create a new dataframe for filtered departure code
+departures<-departures_raw %>%
+  filter(departure_code < 8)
+```
+
+
+
+```{r}
+#view the data
+departures
+```
+
+
+
+```{r}
+#Checking Null values
+apply(departures,2,function(x) sum(is.na(x)))
+```
+
+```{r}
+#drop variables with too much missing values and also drop reduntant columns
+departures<- departures%>%
+  select(-still_there, -interim_coceo,-eight_ks, - cik,- '_merge', -ceo_dismissal, -sources, -leftofc, -gvkey, -co_per_rol)
+```
+
+```{r}
+#Checking Null values
+apply(departures,2,function(x) sum(is.na(x))) 
+```
+
+```{r}
+#view the data
+departures
+```
+
+```{r}
+
+#categorical variable encoding
+ceo_departures <- departures %>%
+  mutate(
+    departure_category = case_when(
+      departure_code <= 4 ~ "Involuntary",
+      between(departure_code, 5, 6) ~ "Voluntary",
+      departure_code >= 7 ~ "Other",
+    )) %>%
+
+    # Treat dismissal_dataset_id
+    mutate(dismissal_dataset_id = as.character(dismissal_dataset_id)) %>%
+    distinct(dismissal_dataset_id, .keep_all = TRUE) %>%
+    
+    # Convert to factor the variables with a few unique values
+    mutate(across(tenure_no_ceodb:fyear_gone, factor)) %>%
+    
+    # Convert to factor all character variables, except the string variable - notes
+    mutate(across(where(is.character), factor)) %>%
+    
+    # Keep notes as character
+    mutate(notes = as.character(notes)) %>%
+    filter(!is.na(notes))
+```
+
+```{r}
+#check unique departure category count
+ceo_departures %>% count(departure_category)
+```
+
+
+```{r}
+# Create a data frame with the counts
+departure_counts <- as.data.frame(table(departures$departure_code))
+
+#Plot pie chart for departure code
+my_colors <- c("#a6d854", "#fff000","#66c2a5" ,"#fc8d62","#1f78b4", "#ffd92f","#d73027", "#e78ac3")
+
+# Create a pie chart using ggplot2 with custom color palette
+ggplot(departure_counts, aes(x = "", y = Freq, fill = Var1)) +
+  geom_bar(stat = "identity", width = 1)+
+  coord_polar("y") +
+  theme_void() +
+  scale_fill_manual(values = my_colors) +  # Custom color palette
+  ggtitle("CEO departure Codes") +
+   labs(fill = "departure codes")
+
+```
+
+
+```{r}
+#plot departure categories
+
+ceo_departures %>%
+  group_by(departure_category) %>%
+  summarize(count = n()) %>%
+  ggplot(aes(x = "", y = count, fill = departure_category)) +
+  geom_bar(stat = "identity", width = 1) +
+  geom_text(aes(label=count),position =position_stack(vjust=0.5))+
+  coord_polar("y", start = 0) +
+  theme_void() +  # Removes unnecessary elements like axes and labels
+  theme(legend.position = "right") +
+  ggtitle("CEO departure categories")
+
+```
+
+
+EXPLORATORY DATA ANALYSIS:
+
+```{r}
+#plot CEO departure by reason
+ceo_departures %>% 
+   group_by(departure_category) %>% 
+   count() %>% 
+   ggplot(aes(y = fct_reorder(departure_category, n), x = n)) + 
+   geom_col(fill = "blue") +
+   labs(
+      title = "CEO depature by reason",
+      x = "",
+      y = "",
+   ) + 
+   scale_x_continuous(breaks = scales::breaks_width(500))+theme_minimal()
+```
+
+
+```{r}
+#plot departure category by reason over time
+ceo_departures %>%
+  group_by(fyear,departure_category) %>% 
+  count() %>% 
+  ggplot(aes(x = fyear, y = n, color = departure_category, group = departure_category)) + 
+  geom_line() + 
+  labs(
+    title = "CEO departure by reason over time",
+    color = "Reason",
+    y     = "Count",
+    x     = "Year"
+  ) +
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+```{r}
+#Plot departure category (voluntary and involuntary) count  by year
+departures_raw%>%
+  filter(departure_code < 9) %>%
+  mutate(involuntary = if_else(departure_code %in% 3:4, "involuntary", "other")) %>%
+  filter(fyear > 1995, fyear < 2019) %>%
+  count(fyear, involuntary) %>%
+  ggplot(aes(fyear, n, color = involuntary)) +
+  geom_line(size = 1.2, alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", lty = 2) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = NULL, y = "Number of CEO departures", color = NULL)+theme_minimal()
+```
+
+```{r}
+#check which CEO names occurs more than 2 in the dataset
+ceo_al_twice <- ceo_departures %>%
+   group_by(exec_fullname) %>% 
+   mutate(appears_al_twice = n(), .after = departure_category) %>% 
+   filter(appears_al_twice > 1) %>%
+   ungroup()
+```
+
+
+```{r}
+#view Total number of CEOs appearing more than 2 times
+length(unique(ceo_al_twice$exec_fullname))
+```
+
+
+```{r}
+# Note: divide to get the unique values
+table(ceo_al_twice$appears_al_twice) / c(2, 3, 4)
+```
+
+
+```{r}
+#Map and plot each exit with departure category
+ceo_changes <- ceo_al_twice %>% 
+   arrange(fyear) %>% 
+   group_by(exec_fullname) %>% 
+   mutate(departure_no = 1:n(), .after = departure_category,
+          departure_no = fct_inorder(recode(departure_no,
+             `1` = "First departure",
+             `2` = "Second departure",
+             `3` = "Third departure",
+             `4` = "Fourth departure"))) %>% 
+   ungroup()
+```
+
+
+```{r}
+#plot departure category with every change
+
+ceo_changes_freq <- ceo_changes %>% 
+   count(departure_category, departure_no)
+
+ceo_4_changes <- ceo_changes %>% 
+   filter(appears_al_twice  == 4)
+
+ggplot(ceo_changes, aes(x = departure_no, y = departure_category)) + 
+   geom_line(aes(group = exec_fullname), alpha = 0.2) +
+   geom_point(
+      data = ceo_changes_freq, 
+      mapping = aes(size = n)) + 
+   geom_line(
+      data = ceo_4_changes, 
+      mapping = aes(group = exec_fullname, color = exec_fullname),
+      show.legend = FALSE) +
+    geom_text_repel(
+    data = filter(ceo_4_changes, departure_no == "Fourth departure"), 
+    mapping = aes(label = exec_fullname),
+    nudge_y = -0.1,
+    size = 3  # Adjust the size value as needed
+      ) + 
+   labs(
+      title = "Trajectories of the reasons for CEO departure",
+      x = "",
+      y = "",
+      size = "Number of cases"
+   ) +theme_minimal()
+```
+
+Just to dig in what is actual voluntary reason it is, will do below:
+
+```{r}
+#Map each exit of ceo with exact reasons
+departures_reduced <- ceo_departures %>% 
+   filter(departure_code %in% 1:9) %>% 
+   mutate(
+      departure_label = as.factor(recode(departure_code,
+        `1` = "Death",
+        '2'= "Illness",
+         `3` = "Bad performance",
+         `4` = "Legal",
+         `5` = "Retired",
+         `6` = "New opportunity",
+         `7` = "Other",
+        '8' = "Missing",
+        '9'="Error")),
+      fyear = lubridate::make_date(fyear)) %>% 
+   relocate(fyear, departure_label)
+```
+
+
+```{r}
+#check which CEO names occurs more than 2 in the dataset
+ceo_al_twice <- departures_reduced %>%
+   group_by(exec_fullname) %>% 
+   mutate(appears_al_twice = n(), .after = departure_label) %>% 
+   filter(appears_al_twice > 1) %>%
+   ungroup()
+```
+
+
+```{r}
+#check the total count of CEOs occuring more than two
+length(unique(ceo_al_twice$exec_fullname))
+```
+
+
+```{r}
+# Note: divide to get the unique values
+table(ceo_al_twice$appears_al_twice) / c(2, 3, 4)
+```
+
+
+```{r}
+#Map and plot each exit with departure category
+ceo_changes <- ceo_al_twice %>% 
+   arrange(fyear) %>% 
+   group_by(exec_fullname) %>% 
+   mutate(departure_no = 1:n(), .after = departure_label,
+          departure_no = fct_inorder(recode(departure_no,
+             `1` = "First departure",
+             `2` = "Second departure",
+             `3` = "Third departure",
+             `4` = "Fourth departure"))) %>% 
+   ungroup()
+
+```
+
+
+```{r}
+#plot departure category with every change
+
+
+ceo_changes_freq <- ceo_changes %>% 
+   count(departure_label, departure_no)
+
+ceo_4_changes <- ceo_changes %>% 
+   filter(appears_al_twice  == 4)
+
+ggplot(ceo_changes, aes(x = departure_no, y = departure_label)) + 
+   geom_line(aes(group = exec_fullname), alpha = 0.2) +
+   geom_point(
+      data = ceo_changes_freq, 
+      mapping = aes(size = n)) + 
+   geom_line(
+      data = ceo_4_changes, 
+      mapping = aes(group = exec_fullname, color = exec_fullname),
+      show.legend = FALSE) +
+  geom_text_repel(
+  data = filter(ceo_4_changes, departure_no == "Fourth departure"), 
+  mapping = aes(label = exec_fullname),
+  nudge_y = -0.1,
+  size = 3  # Adjust the size value as needed
+      ) + 
+   labs(
+      title = "Trajectories of the reasons for CEO departure",
+      x = "",
+      y = "",
+      size = "Number of cases"
+   ) +theme_minimal()
+```
+
+Two CEOs appear 4 times in the data set. None of them left for legal or bad performance reasons. Interestingly, retirement doesn’t seem to be “final”. Some CEO come back. All in all, there is no overwhelmingly clear connection but certainly some interesting insights.
+
+
+```{r}
+#plot ceo departures across companies
+top_companies <- ceo_departures %>% 
+    count(coname) %>% 
+    slice_max(n, n = 10) %>% pull(coname)
+
+ceo_departures %>%
+  filter(coname %in% top_companies) %>%
+    ggplot(aes(coname, fill = departure_category)) +
+    geom_bar(position = "fill") +
+    coord_flip()+
+    labs(title = "Proportion of Departed CEOs by Companies",
+         x = NULL, y = "Proportion", fill = NULL) +  theme_minimal()+ theme(axis.text.y = element_text(size = 6))
+```
+
+
+```{r}
+#plot ceo departures by tenure
+ceo_departures%>%
+    ggplot(aes(tenure_no_ceodb, fill = departure_category)) +
+    geom_bar(position = "fill") +
+    coord_flip() +
+    labs(title = "Proportion of Departed CEOs by Tenure Number",
+         x = NULL, y = "Proportion", fill = NULL)+theme_minimal()
+```
+
+
+```{r}
+#plot ceo departure by max tenure number
+ceo_departures %>%
+    ggplot(aes(max_tenure_ceodb, fill = departure_category)) +
+    geom_bar(position = "fill") +
+    coord_flip() +
+    labs(title = "Proportion of Departed CEOs by Max Tenure Number",
+         x = NULL, y = "Proportion", fill = NULL)+theme_minimal()
+```
+
+CORELATION ANALYSIS:
+
+
+```{r}
+library(dplyr)
+
+# Select only numeric columns
+numeric_data <- departures_raw %>% select_if(is.numeric)
+
+# Remove rows with missing values in numeric columns
+complete_cases <- complete.cases(numeric_data)
+numeric_data_no_na <- numeric_data[complete_cases, ]
+
+# Compute the correlation matrix
+cor_matrix <- cor(numeric_data_no_na)
+
+# Print the correlation matrix
+print(cor_matrix)
+
+```
+
+
+
+TEXT ANALYSIS:
+
+```{r}
+
+# Tokenize the 'notes' column into individual words
+tokenized_data <- ceo_departures %>%
+  unnest_tokens(word, notes)
+
+# Remove stop words
+tokenized_data <- tokenized_data %>%
+  anti_join(stop_words)
+
+# Calculate summary statistics for each word
+word_stats <- tokenized_data %>%
+  group_by(word) %>%
+  summarize(
+    mean_departure_code = mean(departure_code, na.rm = TRUE),
+    sd_departure_code = sd(departure_code, na.rm = TRUE),
+    n = n()
+  )
+
+# Display the summary statistics
+print(word_stats)
+
+```
+
+
+
+```{r}
+
+# Select the top 30 words
+top_30_words <- word_stats %>%
+  top_n(10, wt = n)
+
+# Create a scatter plot for the top 30 words
+word_stats_plot <- ggplot(top_30_words, aes(x = mean_departure_code, y = word, size=n)) +
+  geom_point() +
+  labs(title = "Relation between departure code and words") +
+  scale_size_continuous(name = "Count") +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  theme(axis.text.y = element_text(angle = 0, hjust = 1))
+
+word_stats_plot
+
+```
+
+
+
+```{r}
+
+
+log_odds_weighted_tb <- ceo_departures %>%
+    
+    # Extract most frequent words from notes
+    unnest_tokens(word, notes) %>%
+    anti_join(stop_words) %>%
+    count(departure_category, word) %>%
+    # slice_max(order_by = n, n = 100) %>%
+    
+    # Calculate how likely each word show up from dismissed CEO's notes
+    bind_log_odds(departure_category, word, n) %>%
+    arrange(-log_odds_weighted) 
+    
+```
+
+
+```{r}
+# Select the category
+log_odds_weighted_tb %>% 
+    filter(departure_category == "Involuntary") %>%
+    slice_max(order_by = n, n = 30) %>%
+    
+    ggplot(aes(log_odds_weighted, fct_reorder(word, log_odds_weighted),size=n)) +
+    geom_point(fill = "orange") +
+    
+    labs(title = "The most likely word in the Involuntary CEO's departure notes",
+         y = "Words from Notes", x = "Ratio")+theme_minimal()
+```
+
+
+
+```{r}
+log_odds_weighted_tb %>% 
+    filter(departure_category == "Voluntary") %>%
+    slice_max(order_by = n, n = 30) %>%
+    
+    ggplot(aes(log_odds_weighted, fct_reorder(word, log_odds_weighted), size=n)) +
+    geom_point(fill = "midnightblue") +
+    
+    labs(title = "The most likely word in the Voluntary CEO's departure notes",
+         y = "Words from Notes", x = "Ratio")+theme_minimal()
+```
+
+
+```{r}
+#view data
+ceo_departures
+```
+
+MODEL BUILDING AND EVALUATION:
+
+MODEL 1: GENERALIZED LINEAR MODEL
+
+```{r}
+#preapre data for model1
+departures1 <- departures_raw %>%
+  filter(departure_code < 8) %>%
+  mutate(involuntary = if_else(departure_code %in% 3:4, "involuntary", "other")) %>%
+  filter(fyear > 1995, fyear < 2019)
+departures1
+```
+
+
+
+```{r}
+
+df <- departures1 %>%
+  count(fyear, involuntary) %>%
+  pivot_wider(names_from = involuntary, values_from = n)
+
+mod <- glm(cbind(involuntary, other) ~ fyear, data = df, family = "binomial")
+summary(mod)
+```
+
+```{r}
+#view the dataframe
+df
+```
+
+
+```{r}
+# Count the occurrences of 'fyear' and 'involuntary' in the 'departures1' dataset
+df <- departures1 %>% count(fyear,involuntary) %>%
+  
+# Pivot the data to wide format with 'involuntary' as column names and 'n' as values
+  pivot_wider(names_from = involuntary , values_from = n)
+
+# Fit a generalized linear model (GLM) using binomial family
+mod <- glm(cbind(involuntary, other) ~ fyear, data = df, family = "binomial")
+
+# Display a summary of the fitted model
+summary(mod)
+```
+
+```{r}
+# Tidy and exponentiate the coefficients of the fitted model 'mod'
+tidy(mod, exponentiate = TRUE)
+```
+
+When we use exponentiate = TRUE, we get the model coefficients on the linear scale instead of the logistic scale.
+
+What we want to do is fit a model like this a whole bunch of times, instead of just once. Let’s create bootstrap resamples.
+
+
+```{r}
+# Set a seed for reproducibility
+set.seed(123)
+
+# Create bootstrap samples using the 'bootstraps' function from
+# The number of times the resampling is done is set to 1000
+ceo_folds <- bootstraps(departures1, times = 1e3)
+
+# Display the resulting bootstrap samples
+ceo_folds
+```
+
+
+Now we need to make a function to count up the departures by year and type, fit our model, and return the coefficients we want.
+
+
+```{r}
+# Define a function named 'fit_binom' for fitting a binomial generalized linear model (GLM) to a subset of data.
+fit_binom <- function(split) {
+  
+  # Extract the analysis data from the split and perform data manipulation
+  df <- analysis(split) %>%
+    count(fyear, involuntary) %>%
+    pivot_wider(names_from = involuntary, values_from = n)
+
+   # Fit a binomial generalized linear model (GLM) using the pivoted data 
+   mod <- glm(cbind(involuntary, other) ~ fyear, data = df, family = "binomial")
+   # Extract and tidy the model coefficients, exponentiate for interpretation
+   tidy(mod, exponentiate = TRUE)
+}
+```
+
+
+We can apply that function to all our bootstrap resamples with purrr::map().
+
+```{r}
+
+# Apply the 'fit_binom' function to each split in 'ceo_folds' using 'map'
+boot_models <- ceo_folds %>% mutate(coef_info = map(splits, fit_binom))
+boot_models
+```
+
+
+What did we find? We can compute bootstrap confidence intervals with int_pctl().
+
+```{r}
+#Calculate percentile intervals for the model coefficients using 'int_pctl'
+percentile_intervals <- int_pctl(boot_models, coef_info)
+
+# Display the resulting percentile intervals
+percentile_intervals
+```
+
+
+We can also visualize the results as well.
+
+```{r}
+# Extract information from each bootstrap model and unnest the coefficients
+# Filter for the term "fyear" and create a histogram using ggplot
+boot_models %>%
+  unnest(coef_info) %>%
+  filter(term == "fyear") %>%
+  ggplot(aes(estimate)) +
+  geom_vline(xintercept = 1, lty = 2, color = "gray50", size = 2) +
+  geom_histogram(fill="yellow") +
+  labs(
+    x = "Annual increase in involuntary CEO departures",
+    title = "Over this time period, CEO departures are increasingly involuntary",
+    subtitle = "Each passing year corresponds to a departure being 1-2% more likely to be involuntary"
+  )+theme_minimal()
+```
+
+
+MODEL 2:
+
+PREPARE THE DATA FOR MODEL:
+
+```{r}
+#remove unwanted features
+data <- ceo_departures %>%
+  select(-coname, -exec_fullname, -departure_code,-fyear_gone)
+```
+
+
+```{r}
+data
+```
+
+
+
+```{r}
+
+# data <- sample_n(data, 100)
+
+# Set a seed for reproducibility
+set.seed(123)
+
+# Split the 'data' into training and testing
+departure_split <- initial_split(data, strata = departure_category)
+
+# Extract the training and testing sets from the split
+departure_train <- training(departure_split)
+departure_test <- testing(departure_split)
+
+# Set a different seed for cross-validation
+set.seed(234)
+
+# Create cross-validation folds from the training
+departure_folds <- vfold_cv(departure_train, strata = departure_category)
+
+# Display the resulting cross-validation folds
+departure_folds
+```
+
+
+```{r}
+# Create a recipe for modeling departure_category using the departure_train data
+departures_rec <- 
+    recipe(departure_category ~ ., data = departure_train) %>%
+  # Update the role of 'dismissal_dataset_id' to "id"
+    update_role(dismissal_dataset_id, new_role = "id") %>%
+  
+  # Tokenize the 'notes' column
+    step_tokenize(notes) %>%
+  
+  # Remove stopwords from the 'notes' column
+    step_stopwords(notes) %>%
+  
+  # Limit the number of tokens to 100 in the 'notes' column
+    step_tokenfilter(notes, max_tokens = 100) %>%
+  
+  # Apply TF-IDF transformation to the 'notes' column
+    step_tfidf(notes) %>%
+  
+  # Create dummy variables for all nominal predictors
+    step_dummy(all_nominal_predictors())
+
+# Prepare the recipe
+departures_rec %>% prep() %>% juice() %>% glimpse()
+```
+
+
+```{r}
+# Prepare the 'departures_rec' recipe
+# Apply the recipe transformations to the data and extract the first tidy summary
+prep(departures_rec) %>%
+  tidy(number = 1)
+```
+
+
+```{r}
+
+# Apply the 'departures_rec' recipe to prepare the data
+# Extract a tidy summary of the prepared data, considering only the first row
+tidy_result <- departures_rec %>%
+  prep() %>%
+  tidy(number = 1) %>%
+  filter(terms == "..new")
+```
+
+
+```{r}
+# Define an XGBoost specification for a classification model
+xgb_spec <-
+  boost_tree(
+    trees = tune(), # Number of trees to be tuned
+    min_n = tune(), # Minimum number of observations in a node to be tuned
+    mtry = tune(),  # Number of variables randomly sampled as candidates at each split to be tuned
+    learn_rate = 0.01 # Learning rate set to 0.01
+  ) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+# Create a workflow using the defined XGBoost specification and the 'departures_rec'
+xgb_wf <- workflow(departures_rec, xgb_spec)
+```
+
+
+
+```{r}
+library(finetune)
+
+# Register a parallel backend for parallel processing with 3 cores
+doParallel::registerDoParallel(cores=3)
+
+# Set a seed for reproducibility
+set.seed(345)
+
+# Tune the parameters of the XGBoost model using a grid search
+# with 5 iterations per combination of hyperparameters
+xgb_rs <- tune_grid(
+  xgb_wf, # XGBoost workflow to be tuned
+  resamples = departure_folds, # Cross-validation folds
+  grid = 5, # Number of iterations per combination of hyperparameters
+  control = control_grid(verbose = TRUE, save_pred = TRUE) # Grid search
+)
+
+# Display the results of tuning
+xgb_rs
+```
+
+
+```{r}
+#collect the metrics
+collect_metrics(xgb_rs)
+```
+
+
+Finalize Workflow:
+
+```{r}
+
+# Finalize the XGBoost workflow by selecting the best hyperparameters based on accuracy
+# and fitting the model on the entire training data
+xgb_last <- xgb_wf %>%
+  finalize_workflow(select_best(xgb_rs, "accuracy")) %>%
+  last_fit(departure_split)
+
+# Display the results of the final model fit
+xgb_last
+```
+
+
+```{r}
+#collect metrics
+collect_metrics(xgb_last)
+```
+
+
+```{r}
+#confusion matrix
+collect_predictions(xgb_last) %>%
+    conf_mat(departure_category, .pred_class)
+```
+
+
+```{r}
+#plot the confusion matrix
+collect_predictions(xgb_last) %>%
+    conf_mat(departure_category, .pred_class) %>% autoplot
+```
+
+
+```{r}
+#variable importance plot
+library(vip)
+xgb_last %>%
+  extract_fit_engine() %>%
+  vip()+theme_minimal()
+```
+
+
+MODEL 3: SUPPORT VECTOR MACHINE:
+
+```{r}
+#prepare data for model 3
+data_filtered <- data[data$departure_category != "Other",]
+```
+
+
+
+```{r}
+# data <- sample_n(data, 100)
+
+library(tidymodels)
+
+#set reproducibility
+set.seed(123)
+
+#split the data
+departure_split <- initial_split(data_filtered, strata = departure_category)
+
+#extract train and test data
+departure_train <- training(departure_split)
+departure_test <- testing(departure_split)
+
+#set reproducibility
+set.seed(234)
+departure_folds <- vfold_cv(departure_train, strata = departure_category)
+departure_folds
+```
+
+
+```{r}
+
+library(recipes)
+library(rsample)
+
+# Feature engineering
+## Creating preprocessing recipe for predicting voluntary/involuntary departures
+departures_rec <-  recipe(departure_category ~ notes, data = departure_train) %>%
+  # Splitting the "notes" variable into individual tokens (words)
+  step_tokenize(notes) %>%
+  # Limiting number of tokens used in model
+  step_tokenfilter(notes, max_tokens = 1000) %>%
+  # Weighing tokens by tf-idf
+  step_tfidf(notes) %>%
+  # Normalising numeric predictors
+  step_normalize(all_numeric_predictors())
+
+```
+
+
+```{r}
+# Specifying the machine learning model
+## This model will use a linear Support Vector Machine (SVM)
+svm_spec <- svm_linear() %>%
+  set_mode("classification") %>%
+  set_engine("LiblineaR")
+
+```
+
+
+```{r}
+# Combining the feature engineering recipe and model spec to create a workflow
+departures_wf <- workflow() %>%
+  add_recipe(departures_rec) %>%
+  add_model(svm_spec)
+```
+
+
+```{r}
+# Printing the workflow
+departures_wf
+```
+
+
+```{r}
+# Selecting the metrics used for modelling
+departures_metrics <- metric_set(accuracy, recall, precision)
+```
+
+
+```{r}
+# Setting up parallel processing
+library(parallel)
+library(doParallel)
+cl <- makePSOCKcluster(detectCores() - 1)
+registerDoParallel(cl)
+
+```
+
+
+```{r}
+
+library(LiblineaR)
+# Setting seed for reproducibility
+set.seed(100)
+# Fitting models using resampling
+svm_results <- fit_resamples(
+  departures_wf, # Specifying workflow
+  departure_folds, # Specifying cross validation folds
+  metrics = departures_metrics, # Metrics used for modelling
+  control = control_resamples(save_pred = TRUE) # Saving predictions for confusion matrix
+)
+
+# Printing performance metrics of SVM model
+collect_metrics(svm_results)
+```
+
+
+```{r}
+# Setting seed for reproducibility
+set.seed(100)
+
+# Fitting the final model
+final_fitted <- last_fit(departures_wf, departure_split,
+                      metrics = departures_metrics)
+
+# Printing performance metrics of final fitted model
+collect_metrics(final_fitted)
+```
+
+
+```{r}
+# Printing the confusion matrix of the model trained using the 10-fold cv
+## training data
+svm_results %>%
+  conf_mat_resampled(tidy = FALSE)
+```
+
+
+```{r}
+# Printing the confusion matrix of the final fitted model
+collect_predictions(final_fitted) %>%
+  conf_mat(departure_category, .pred_class)
+```
+
+
+
+```{r}
+# Visualising confusion matrix of the final fitted model
+collect_predictions(final_fitted) %>%
+  conf_mat(departure_category, .pred_class) %>%
+  autoplot() +
+  labs(title = "Prediction vs Truth for final linear SVM model",
+       subtitle = "Class imbalance is an issue; most of the observations were of Voluntary CEO departures")
+```
+
+
+```{r}
+# Extracting model fit
+departures_fit <- pull_workflow_fit(final_fitted$.workflow[[1]])
+
+# Visualising the most important words for predicting whether a CEO departure
+## was voluntary
+tidy(departures_fit) %>%
+  filter(term != "Bias") %>%
+  group_by(sign = estimate > 0) %>%
+  slice_max(abs(estimate), n = 15) %>% 
+  ungroup() %>%
+  mutate(term = str_remove(term, "tfidf_notes_"), # Tidying terms
+         sign = ifelse(sign, "More likely from InVoluntary CEO departures",
+                       "More likely from Voluntary CEO departures")) %>%
+  ggplot(aes(abs(estimate), fct_reorder(term, abs(estimate)), fill = sign)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sign, scales = "free") +
+  labs(x = "Coefficient from linear SVM", y = NULL) +
+  scale_fill_brewer(palette = "Set1") +
+  theme_classic() +
+  labs(titles = "Which Words are more likely to be used when a CEO leaves Involuntarily vs. Voluntarily?",
+       subtitle = "Importance assigned by linear SVM model, based on descriptions of CEO departures")
+```

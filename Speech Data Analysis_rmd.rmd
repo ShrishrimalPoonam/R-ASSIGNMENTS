@@ -1,0 +1,742 @@
+---
+title: "AI&ML_ASSESSMENT 2"
+author: "POONAM PRAFUL SHRISHRIMAL_s8075211"
+date: "2023-09-06"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+
+```{r}
+#Stop / hide warnings
+options(warn = -1)
+```
+
+
+#### **Import the required libraries** ####
+
+```{r}
+# set options
+options(stringsAsFactors = F)         # no automatic data transformation
+options("scipen" = 100, "digits" = 4) # suppress math annotation
+# load packages
+library(knitr) 
+library(DT)
+library(tm)
+library(topicmodels)
+library(reshape2)
+library(ggplot2)
+library(wordcloud)
+library(pals)
+library(SnowballC)
+library(lda)
+library(ldatuning)
+library(flextable)
+```
+
+
+#### **Import the data** ####
+
+
+```{r}
+# load data
+df=read.csv("E:/VU SYDNEY/AI&ML/Speechdata.csv")
+
+```
+
+
+#### **Data Review** ####
+
+<div style="text-align: justify">
+*Reviewing the data is a critical step in any data analysis or machine learning project. It helps ensure the quality, integrity, and suitability of the data for the intended analysis or modeling task.It allows us to understand the data structure, type and also help us to identify errors and inconsistencies.*
+</div>
+
+```{r}
+head(df)  # View the first few rows
+
+```
+
+```{r}
+tail(df)  # View the last few rows
+```
+
+
+
+
+<div style="text-align: justify">
+*After reviewing the data it is clear that we need to clean it. There are lot of symbols and stopwords use which will not serve meaningful in our analysis and will give unexpected results so data cleaning and pre-processing is must here.*
+</div>
+
+
+```{r}
+#Let's create a word cloud
+
+# Load the required library
+library(wordcloud)
+
+# Tokenize the "text" column into words
+words <- unlist(strsplit(df$text, " "))
+
+# Calculate word frequencies
+word_freq <- table(words)
+
+# Sort the word frequencies in descending order
+sorted_word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Create a word cloud with all words
+wordcloud(words = names(sorted_word_freq),
+          freq = sorted_word_freq,
+          scale = c(3, 0.5), random.order = FALSE,
+          colors = brewer.pal(8, "Dark2"))
+
+```
+
+
+
+```{r}
+#Lets create a frequency plot of words
+
+# Load required libraries
+library(wordcloud)
+library(RColorBrewer)
+library(ggplot2)
+
+# Tokenize the "text" column into words
+words <- unlist(strsplit(df$text, " "))
+
+# Calculate word frequencies
+word_freq <- table(words)
+
+# Sort the word frequencies in descending order
+sorted_word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Select the top 30 words
+top_30_words <- head(sorted_word_freq, 30)
+
+# Create a data frame with appropriate column names
+plot_data <- data.frame(Words = names(top_30_words), Frequency = as.numeric(top_30_words))
+
+```
+
+
+```{r}
+
+# Create a frequency plot 
+ggplot(plot_data, aes(x = Words, y = Frequency)) +
+  geom_bar(stat = "identity", fill = "orange") +
+  labs(title = "Top 30 Words Frequency", x = "Words", y = "Frequency") +
+  theme_minimal() +
+  coord_flip()
+```
+
+<div style="text-align: justify">
+*After reviewing the data it is clear that we need to clean it. There are lot of symbols and stopwords use which will not serve meaningful in our analysis and will give unexpected results so data cleaning and pre-processing is must here.*
+</div>
+
+
+```{r}
+# Calculate paragraph lengths
+paragraph_lengths <- sapply(df$text, function(x) length(unlist(strsplit(x, " "))))
+
+# Create a bar plot with colors and limit to 100 words
+top_100_lengths <- paragraph_lengths[paragraph_lengths <= 100]  # Filter to 100 words or fewer
+
+# Create a color palette (adjust the number of colors as needed)
+colors <- rainbow(length(unique(top_100_lengths)))
+
+# Create a bar plot with colors
+barplot(table(top_100_lengths), main = "Paragraph Length Distribution (Top 100 Words)", 
+        xlab = "Word Count", ylab = "Frequency", col = colors)
+
+
+```
+
+
+
+
+#### **Data Cleaning and Pre-processing** ####
+
+<div style="text-align: justify">
+*Cleaning data is crucial because it ensures the accuracy, reliability, and effectiveness of your analysis and decision-making processes.*
+</div>
+
+
+
+```{r}
+# Load the required libraries
+library(tm)
+
+# Create a corpus from the text data
+corpus <- Corpus(DataframeSource(df))
+
+# Preprocessing chain
+processedCorpus <- tm_map(corpus, content_transformer(tolower))  # Convert to lowercase
+processedCorpus <- tm_map(processedCorpus, removePunctuation)  # Remove punctuation
+processedCorpus <- tm_map(processedCorpus, removeNumbers)  # Remove numbers
+
+# Remove inbuilt English stopwords
+processedCorpus <- tm_map(processedCorpus, removeWords, stopwords("en"))
+
+# Stemming (if desired, you can skip this step if it doesn't improve results)
+processedCorpus <- tm_map(processedCorpus, stemDocument, language = "en")
+
+# Strip extra whitespace
+processedCorpus <- tm_map(processedCorpus, stripWhitespace)
+
+```
+
+
+```{r}
+# compute document term matrix with terms >= minimumFrequency
+minimumFrequency <- 5
+DTM <- DocumentTermMatrix(processedCorpus, control = list(bounds = list(global = c(minimumFrequency, Inf))))
+```
+
+
+
+```{r}
+# due to vocabulary pruning, we have empty rows in our DTM
+# LDA does not like this. So we remove those docs from the
+# DTM and the metadata
+sel_idx <- slam::row_sums(DTM) > 0
+DTM <- DTM[sel_idx, ]
+df<- df[sel_idx, ]
+```
+
+
+```{r}
+#Lets create a word cloud
+
+# Get the terms (words) from the DTM
+terms <- Terms(DTM)
+
+# Create a named vector of word frequencies
+word_freq <- as.vector(slam::row_sums(DTM))
+
+# Sort the word frequencies in descending order
+sorted_word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Filter the word frequencies to include only non-zero values
+non_zero_word_freq <- sorted_word_freq[sorted_word_freq > 0]
+
+# Create a word cloud with all words
+wordcloud(words = terms,
+          freq = non_zero_word_freq,
+          scale = c(2, 0.5), random.order = FALSE,
+          colors = brewer.pal(8, "Dark2"))
+```
+
+
+```{r}
+#Lets create a frequency plot of words
+
+# Get the terms (words) from the DTM
+terms <- Terms(DTM)
+
+# Create a named vector of word frequencies
+word_freq <- as.vector(slam::row_sums(DTM))
+
+# Sort the word frequencies in descending order
+sorted_word_freq <- sort(word_freq, decreasing = TRUE)
+
+# Filter the word frequencies to include only non-zero values
+non_zero_word_freq <- sorted_word_freq[sorted_word_freq > 0]
+
+# Select the top N words (e.g., top 20 words)
+top_N <- 20
+top_terms <- terms[1:top_N]
+top_freq <- non_zero_word_freq[1:top_N]
+
+# Create a data frame for the bar plot
+plot_data <- data.frame(Words = top_terms, Frequency = top_freq)
+
+# Create a bar plot with flipped coordinates and minimal theme
+library(ggplot2)
+ggplot(plot_data, aes(x = Frequency, y = Words)) +
+  geom_bar(stat = "identity", fill = "yellow") +
+  labs(title = "Top 20 Words Frequency", x = "Frequency", y = "Words") +
+  theme_minimal() +
+  theme(legend.position = "none") # Remove the legend for fill
+
+```
+
+
+<div style="text-align: justify">
+*After cleaning the data this world cloud now make sense and we can tell about the content of the speech.*
+</div>
+
+
+#### **Model Building** ####
+
+##### **1. Finding Value of k:** #####
+
+<div style="text-align: justify">
+*For models with parameters like Latent Dirichlet Allocation (LDA), selecting the number of topics i.e., K, is a crucial step. The choice of the optimal K depends on various factors. If K is set too low, the collection is segmented into only a few broad semantic contexts. Conversely, if K is excessively high, the collection is split into numerous topics, some of which might overlap, while others become challenging to interpret.*
+</div>
+
+##### **a.Perplexity** #####
+<div style="text-align: justify">
+*We will use a perplexity approach first and try to get the number of topics through minimum perplexity.*
+</div>
+
+
+```{r}
+set.seed(87460945)
+
+# Calculate folds
+idxs <- sample(seq_len(9))
+folds <- split(idxs, rep(1:3, each = 3, length.out = 9))
+
+# Define number of topics
+topics <- seq(2, 50, 1)
+
+# Create data frame for storing results
+results <- data.frame()
+
+# Perform cross-validation
+for (k in topics) {
+  scores <- c()
+  for (i in 1:3) {
+    test_idx <- folds[[i]]
+    train_idx <- setdiff(unlist(folds, use.names = FALSE), test_idx)
+
+    test <- DTM[test_idx, ]
+    train <- DTM[train_idx, ]
+
+    LDA.out <- LDA(train, k, method = "Gibbs")
+
+    # Calculate perplexity for the test data
+    log_likelihood <- logLik(LDA.out, newdata = test)
+    n_tokens_test <- sum(test)
+    perplexity <- exp(-sum(log_likelihood) / n_tokens_test)
+    
+    scores <- c(scores, perplexity)
+  }
+  temp <- data.frame("K" = k, "Perplexity" = mean(scores))
+  results <- rbind(results, temp)
+}
+
+# Plot Perplexity vs. K
+library(ggplot2)
+ggplot(results, aes(x = K, y = Perplexity)) +
+  geom_line() +
+  ggtitle("Perplexity vs. Number of Topics K") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+
+
+```{r}
+# Find the row with the minimum perplexity
+min_perplexity_row <- results[which.min(results$Perplexity), ]
+
+# Extract the minimum perplexity value and corresponding K value
+min_perplexity <- min_perplexity_row$Perplexity
+corresponding_K <- min_perplexity_row$K
+
+# Print the results
+cat("Minimum Perplexity:", min_perplexity, "\n")
+cat("Corresponding K (Number of Topics):", corresponding_K, "\n")
+
+```
+
+
+<div style="text-align: justify">
+*From the above graph of perplexity though the minimum perplexity is at 5 number of topics but still we can see that there are multiple elbow points so we need to consider other approaches or a combination of methods to make an informed decision*
+</div>
+
+
+##### **b. FindTopicNumber** #####
+
+<div style="text-align: justify">
+*We will use a FindTopicNumber approach to determining the number of topics which explores a range of values rather than fixating on a specific number.We will use only two metrics (CaoJuan2009 and Deveaud2014)*
+</div>
+
+```{r}
+# create models with different number of topics
+result <- ldatuning::FindTopicsNumber(
+  DTM,
+  topics = seq(from = 2, to = 20, by = 1),
+  metrics = c("CaoJuan2009",  "Deveaud2014"),
+  method = "Gibbs",
+  control = list(seed = 77),
+  verbose = TRUE
+)
+```
+
+
+```{r}
+#Plot the results
+FindTopicsNumber_plot(result)
+```
+
+<div style="text-align: justify">
+*For our minima we see CaoJuan2009 suggests 20 and our maxima we find Deveaud2014 also suggests around 18 and 20.For our first analysis, however, we choose a thematic “resolution” of K = 20 topics.*
+</div>
+
+
+#### **Model Fitting** ##
+
+
+```{r}
+# number of topics
+K <- 20
+
+# set random number generator seed
+set.seed(9161)
+
+# compute the LDA model, inference via 1000 iterations of Gibbs sampling
+topicModel <- LDA(DTM, K, method="Gibbs", control=list(iter = 500, verbose = 25))
+```
+
+
+<div style="text-align: justify">
+*The topic model inference results in two (approximate) posterior probability distributions: a distribution theta over K topics within each document and a distribution beta over V terms within each topic, where V represents the length of the vocabulary of the collection (V = 4278). Let’s take a closer look at these results:*
+</div>
+
+
+
+```{r}
+# have a look a some of the results (posterior distributions)
+tmResult <- posterior(topicModel)
+# format of the resulting object
+attributes(tmResult)
+```
+
+
+```{r}
+nTerms(DTM)              # lengthOfVocab
+```
+
+
+```{r}
+# topics are probability distributions over the entire vocabulary
+beta <- tmResult$terms   # get beta from results
+dim(beta)                # K distributions over nTerms(DTM) terms
+```
+
+
+```{r}
+rowSums(beta)            # rows in beta sum to 1
+```
+
+
+```{r}
+nDocs(DTM)               # size of collection
+```
+
+```{r}
+# for every document we have a probability distribution of its contained topics
+theta <- tmResult$topics 
+dim(theta)               # nDocs(DTM) distributions over K topics
+```
+
+```{r}
+rowSums(theta)[1:10]     # rows in theta sum to 1
+```
+
+<div style="text-align: justify">
+*Let’s take a look at the 10 most likely terms within the term probabilities beta of the inferred topics (only the first 8 are shown below).*
+</div
+
+
+```{r}
+terms(topicModel, 10)
+```
+
+
+```{r}
+exampleTermData <- terms(topicModel, 10)
+exampleTermData[, 1:8]
+```
+
+<div style="text-align: justify">
+*For the next steps, we want to give the topics more descriptive names than just numbers. Therefore, we simply concatenate the five most likely terms of each topic to a string that represents a pseudo-name for each topic*
+</div
+
+
+
+```{r}
+top5termsPerTopic <- terms(topicModel, 5)
+topicNames <- apply(top5termsPerTopic, 2, paste, collapse=" ")
+```
+
+
+#### ** Topic and word visualization** ####
+
+```{r}
+# visualize topics as word cloud
+topicToViz <- 11 # change for your own topic of interest
+topicToViz <- grep('mexico', topicNames)[1] # Or select a topic by a term contained in its name
+# select to 40 most probable terms from the topic by sorting the term-topic-probability vector in decreasing order
+top40terms <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+# extract the probabilites of each of the 40 terms
+probabilities <- sort(tmResult$terms[topicToViz,], decreasing=TRUE)[1:40]
+# visualize the terms as wordcloud
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, random.colors=TRUE)
+```
+
+
+<div style="text-align: justify">
+*Let us now look more closely at the distribution of topics within individual documents. To this end, we visualize the distribution in 3 sample documents.Let us first take a look at the contents of three sample documents:*
+</div>
+
+
+
+```{r}
+exampleIds <- c(2, 100, 200)
+lapply(corpus[exampleIds], as.character)
+```
+
+```{r}
+exampleIds <- c(2, 100, 200)
+print(paste0(exampleIds[1], ": ", substr(content(corpus[[exampleIds[1]]]), 0, 400), '...'))
+```
+
+
+```{r}
+print(paste0(exampleIds[2], ": ", substr(content(corpus[[exampleIds[2]]]), 0, 400), '...'))
+```
+
+
+```{r}
+print(paste0(exampleIds[3], ": ", substr(content(corpus[[exampleIds[3]]]), 0, 400), '...'))
+```
+
+#### **MODEL EVALUATION** ####
+
+<div style="text-align: justify">
+*Lets visualize the topic distributions within the documents*
+</div>
+
+```{r}
+N <- length(exampleIds)
+# get topic proportions form example documents
+topicProportionExamples <- theta[exampleIds,]
+colnames(topicProportionExamples) <- topicNames
+vizDataFrame <- melt(cbind(data.frame(topicProportionExamples), document = factor(1:N)), variable.name = "topic", id.vars = "document")  
+ggplot(data = vizDataFrame, aes(topic, value, fill = document), ylab = "proportion") + 
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  coord_flip() +
+  facet_wrap(~ document, ncol = N) +
+  scale_fill_manual(values = c("yellow", "green", "darkblue"))+theme_minimal()
+```
+
+
+<div style="text-align: justify">
+*The diagram above illustrates the distribution of topics within a document based on the model. In the current model, all three documents exhibit some degree of each topic, but a few topics dominate each document*
+
+*The allocation of topics within a document can be adjusted using the Alpha parameter of the model. Higher Alpha priors for topics lead to a more uniform distribution of topics within a document, while lower Alpha priors ensure that the inference process concentrates the probability on a select few topics for each document*
+
+*In the previous model calculation, the Alpha prior was automatically estimated to best fit the data (maximizing the overall model probability). However, this automatic estimate may not align with the preferences of an analyst. Depending on our analytical goals, we may desire a distribution of topics in the model that is either more concentrated or more evenly spread*
+
+*Now, let's modify the Alpha prior to a lower value to observe its impact on the topic distributions in the model.*
+</div>
+
+
+
+```{r}
+# see alpha from previous model
+attr(topicModel, "alpha") 
+```
+
+```{r}
+topicModel2 <- LDA(DTM, K, method="Gibbs", control=list(iter = 500, verbose = 25, alpha = 0.2))
+```
+
+
+```{r}
+tmResult <- posterior(topicModel2)
+theta <- tmResult$topics
+beta <- tmResult$terms
+topicNames <- apply(terms(topicModel2, 5), 2, paste, collapse = " ")  # reset topicnames
+```
+
+<div style="text-align: justify">
+*Now visualize the topic distributions in the three documents again and see the difference.*
+</div>
+
+
+```{r}
+# get topic proportions form example documents
+topicProportionExamples <- theta[exampleIds,]
+colnames(topicProportionExamples) <- topicNames
+vizDataFrame <- melt(cbind(data.frame(topicProportionExamples), document = factor(1:N)), variable.name = "topic", id.vars = "document")  
+ggplot(data = vizDataFrame, aes(topic, value, fill = document), ylab = "proportion") + 
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  
+  coord_flip() +
+  facet_wrap(~ document, ncol = N) +
+  scale_fill_manual(values = c("yellow", "green", "darkblue"))+theme_minimal()
+```
+
+
+
+<div style="text-align: justify">
+*We can see that the inference process distributes the probability mass on a few topics for each document..*
+</div>
+
+
+#### **Topic Ranking** ####
+
+<div style="text-align: justify">
+*Initially, we aim to establish a more significant arrangement of the most important terms for each topic by assigning them a particular score. This concept of reordering terms shares similarities with the TF-IDF (Term Frequency-Inverse Document Frequency) approach. Essentially, if a term frequently appears at higher levels relative to its probability, it becomes less valuable in terms of describing the topic. Consequently, this scoring method gives preference to terms that effectively represent a topic*
+</div>
+
+```{r}
+# re-rank top topic terms for topic names
+topicNames <- apply(lda::top.topic.words(beta, 5, by.score = T), 2, paste, collapse = " ")
+```
+
+<div style="text-align: justify">
+*What are the defining topics within a collection? There are different approaches to find out which can be used to bring the topics into a certain order.*
+</div>
+
+
+###### **Approach 1** ######
+<div style="text-align: justify">
+*We sort topics according to their probability within the entire collection*
+</div>
+
+
+```{r}
+# What are the most probable topics in the entire collection?
+topicProportions <- colSums(theta) / nDocs(DTM)  # mean probabilities over all paragraphs
+names(topicProportions) <- topicNames     # assign the topic names we created before
+sort(topicProportions, decreasing = TRUE) # show summed proportions in decreased order
+```
+
+
+
+```{r}
+# What are the most probable topics in the entire collection?
+topicProportions <- colSums(theta) / nDocs(DTM)  # mean probabilities over all paragraphs
+names(topicProportions) <- topicNames     # assign the topic names we created before
+sort(topicProportions, decreasing = TRUE) # show summed proportions in decreased order
+```
+
+
+```{r}
+soP <- sort(topicProportions, decreasing = TRUE)
+paste(round(soP, 5), ":", names(soP))
+```
+
+<div style="text-align: justify">
+*We recognize some topics that are way more likely to occur in the corpus than others. These describe rather general thematic coherence. Other topics correspond more to specific contents.*
+</div>
+
+
+###### **Approach 2** ######
+<div style="text-align: justify">
+*We count how often a topic appears as a primary topic within a paragraph This method is also called Rank-1*
+</div>
+
+```{r}
+countsOfPrimaryTopics <- rep(0, K)
+names(countsOfPrimaryTopics) <- topicNames
+for (i in 1:nDocs(DTM)) {
+  topicsPerDoc <- theta[i, ] # select topic distribution for document i
+  # get first element position from ordered list
+  primaryTopic <- order(topicsPerDoc, decreasing = TRUE)[1] 
+  countsOfPrimaryTopics[primaryTopic] <- countsOfPrimaryTopics[primaryTopic] + 1
+}
+sort(countsOfPrimaryTopics, decreasing = TRUE)
+```
+
+
+```{r}
+so <- sort(countsOfPrimaryTopics, decreasing = TRUE)
+paste(so, ":", names(so))
+```
+
+<div style="text-align: justify">
+*We observe that when we arrange topics using the Rank-1 method, topics characterized by fairly distinct thematic cohesiveness are positioned towards the top of the list.*
+
+*This organization of topics can be applied to subsequent analysis procedures, including interpreting the semantic content of topics within the collection, examining time series data related to the most significant topics, or filtering the original collection based on particular sub-topics.*
+</div>
+
+
+#### **Filtering the Documents** ####
+<div style="text-align: justify">
+*The availability of topic probabilities for each document, or in our case, each paragraph, within a topic model enables us to employ it for thematic filtration of a collection. As part of the filtering process, we choose to retain only those documents that surpass a specific threshold in terms of their probability value for particular topics. For instance, we may opt to retain every document that contains more than 20 percent of topic X.*
+
+*In the subsequent steps, we will filter documents based on their topic content and illustrate how this impacts the overall number of documents over time.*
+</div>
+
+```{r}
+topicToFilter <- 6  # you can set this manually ...
+# ... or have it selected by a term in the topic name (e.g. 'children')
+topicToFilter <- grep('children', topicNames)[1] 
+topicThreshold <- 0.2
+selectedDocumentIndexes <- which(theta[, topicToFilter] >= topicThreshold)
+filteredCorpus <- corpus[selectedDocumentIndexes]
+# show length of filtered corpus
+filteredCorpus
+```
+
+<div style="text-align: justify">
+*Our filtered corpus contains 0 documents related to the topic NA to at least 20 %*
+</div>
+
+
+#### **Topic Proportions over Time** ####
+
+<div style="text-align: justify">
+*Finally, we take a broader look at the evolution of topics within the dataset across different time periods. To achieve this, we calculate the average topic proportions for each decade, considering all State of the Union (SOTU) speeches. These consolidated topic proportions can then be represented visually, for example, in the form of a bar plot.*
+</div>
+
+
+
+```{r}
+# append decade information for aggregation
+df$decade <- paste0(substr(df$date, 0, 3), "0")
+# get mean topic proportions per decade
+topic_proportion_per_decade <- aggregate(theta, by = list(decade = df$decade), mean)
+# set topic names to aggregated columns
+colnames(topic_proportion_per_decade)[2:(K+1)] <- topicNames
+# reshape data frame
+vizDataFrame <- melt(topic_proportion_per_decade, id.vars = "decade")
+# plot topic proportions per decade as bar plot
+ggplot(vizDataFrame, aes(x=decade, y=value, fill=variable)) + 
+  geom_bar(stat = "identity") + ylab("proportion") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "decade") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+theme_minimal()
+```
+
+
+
+```{r}
+#Lets plot a line chart
+
+# Load required libraries
+library(ggplot2)
+
+# Your data preparation code (append decade information and aggregate) remains the same
+
+# Reshape data frame for a line plot
+vizDataFrame <- melt(topic_proportion_per_decade, id.vars = "decade")
+
+# Create a line plot for topic proportions per decade
+ggplot(vizDataFrame, aes(x = decade, y = value, color = variable, group = variable)) +
+  geom_line() +
+  ylab("Proportion") +
+  scale_color_manual(values = paste0(alphabet(20), "FF"), name = "Topic") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+theme_minimal()
+
+```
+
+
+<div style="text-align: justify">
+*The visualization illustrates that in the initial decades, topics related to the interaction between the federal government and individual states, along with internal conflicts, clearly take precedence. In contrast, contemporary State of the Union (SOTU) addresses primarily revolve around security matters and economic concerns, signifying their heightened importance.*
+</div>
+
+
+
