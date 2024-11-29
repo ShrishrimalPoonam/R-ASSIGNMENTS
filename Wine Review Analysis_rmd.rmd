@@ -1,0 +1,712 @@
+---
+title: "ASSESSMENT_3"
+author: "POONAM PRAFUL SHRISHRIMAL_s8075211"
+date: "2023-06-17"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+
+```{r}
+#Importing the dataset
+wine_data <- read.csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-05-28/winemag-data-130k-v2.csv")
+wine_data
+```
+
+```{r}
+summary(wine_data)
+```
+
+```{r}
+library(dplyr)
+glimpse(wine_data)
+```
+
+
+```{r}
+wine_data
+```
+
+
+
+```{r}
+#Checking the null values
+print(colSums(is.na(wine_data)))
+```
+There are nearly 9,000 prices missing
+
+```{r}
+# Now we will remove these NAs
+clean_wine_data <- wine_data[!is.na(wine_data$price), ]
+print(colSums(is.na(clean_wine_data)))
+```
+
+```{r}
+clean_wine_data
+```
+
+```{r}
+# remove duplicates
+library(dplyr)
+clean_wine_data <- clean_wine_data %>% 
+  mutate(duplicate = duplicated(description)) %>% 
+  filter(duplicate==FALSE) %>% 
+  select(-duplicate)
+clean_wine_data
+```
+
+```{r}
+# Let's inspect the amount of unique observations we have in each variable
+unique_vals <- lapply(clean_wine_data, unique)
+sapply(unique_vals, length)
+```
+Analysis of variables:
+
+```{r}
+wine_country <- clean_wine_data %>% 
+  group_by(country) %>% 
+  summarise(total = n()) %>% 
+  arrange(desc(total)) %>% 
+  mutate(totpcnt = round(total/ sum(total), digits=7), accum = cumsum(totpcnt))
+
+wine_country
+```
+
+```{r}
+library(ggplot2)
+wine_country %>% head(10) %>%
+  ggplot( aes(x= factor(country, levels = wine_country$country[order(desc(wine_country$totpcnt))]), y = total)) +
+  geom_col(fill= 'darkorange') + theme_minimal()+
+  geom_text(aes(label = sprintf("%.1f %%", 100*totpcnt), y = total + 1500)) +
+  labs(x="Country", y="Total Reviews", title="Distribution of Wine Reviews by Top 10 Countries")
+```
+
+Based on our graph, we can see that by far, the US has the most wine reviews in this dataset, accounting for 45% of all reviews.The next most frequent countries in our dataset are France with 14.6%, Italy with 13.9%, and Spain with 5.4%. We also see from the cumulative percentages in our table that the top 10 countries account for 96% of the data.
+
+But it’s about quality over quantity, so let’s see who has the best-rated wines. We see that England has the highest-rated wines on average, and the US doesn’t even crack the top 10!
+
+```{r}
+wine_rating = clean_wine_data %>% 
+ group_by(country) %>%
+ summarise_at(vars(points), funs(points = mean(., na.rm=T))) %>%
+ arrange(desc(points)) %>%
+ head(10)
+
+ggplot(data=wine_rating, aes(x=reorder(country,-points), y= points)) + 
+  geom_bar(stat="identity", fill = "skyblue") + theme_minimal() +
+  coord_cartesian(ylim=c(85,92)) + 
+  labs(x="Countries", y="Rating", title="Top 10 Countries by Average Rating")
+```
+
+
+```{r}
+#List the top 10 global wine producers based on data provided
+
+#STEPS:
+# a) We group data by country and count the number of observations. (1 obs. = 1 type of wine) 
+# b) Order output data in DESC order by #of observations (itemCount)
+
+top10_producers <- clean_wine_data %>% group_by(country) %>% summarise(total = n_distinct(variety)) %>% arrange(desc(total)) %>% top_n(10)  
+
+print(top10_producers)
+
+```
+
+```{r}
+library(ggplot2)
+
+# Create a custom palette with 10 colors using the viridis package
+library(viridis)
+my_palette <- viridis(10)
+
+top10_producers %>%
+  ggplot(aes(y = reorder(country, total),
+             x = total,
+             fill = country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = my_palette) +  theme_minimal() + labs(title = "Top 10 Global Wine Producers",
+       x = "Production",
+       y = "Wine Producing Countries")
+```
+
+
+
+Taster analysis
+
+Now, we decide to look into our tasters. We wonder if there are many different tasters or maybe some enthusiasts are much more active than others. We run a similar analysis to the previous one made for countries.
+
+```{r}
+wine_taster <- clean_wine_data %>% group_by(taster_name) %>% summarise(total=n()) %>% 
+  arrange(desc(total)) %>% 
+  mutate(totpcnt = round(total/ sum(total), 7), accum = cumsum(totpcnt))
+
+wine_taster
+```
+
+```{r}
+#Factor the taster name on desc order for organizing the bars on the next plot
+wine_taster$taster_name <- factor(wine_taster$taster_name, levels = wine_taster$taster_name[order(-wine_taster$total)])
+
+#print a plot with the tasters and number of reviews
+wine_taster %>% ggplot(aes(x= taster_name, y=total)) + geom_col(fill="yellow") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_text(aes(label = sprintf("%.f%%", 100*totpcnt), y = total+2000)) +
+  labs(x="Wine Taster Name", y="Total Wine Reviews", title="Total Reviews by Wine Taster")
+```
+
+We find that 21% of our records come from anonymous tasters which might seem a bit strange. But moreover, a single taster accounts for 20% of the reviews (24,912 wines) which raises a lot of concerns for the bias this might introduce on the results of the analysis.
+
+Out of curiosity, we decide to look at the different wine country origins tried by the top 5 tasters.
+
+
+```{r}
+temp <- wine_taster %>% filter(taster_name != "") %>% head(5)
+
+TopTstrCtry <- clean_wine_data %>% 
+  filter(taster_name %in% temp$taster_name) %>%
+  group_by(taster_name, country) %>%
+  summarise(total = n())
+
+TopTstrCtry %>% 
+  ggplot( aes(x=factor(taster_name, levels = wine_taster$taster_name[order(-wine_taster$total)]), 
+              y=factor(country, levels= wine_country$country[order(wine_country$total)]), 
+              size = total)) +
+  geom_point(color='navy') + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(x="Taster", y="Country of Wine Reviewed",title="Countries Reviewed by Top 5 Tasters")
+```
+
+We see that most of them clearly focus on a particular country. Our prolific reviewer, Roger Voss, appears to review mostly French wines and two reviewers, Kerin O’Keefe and Virginie Boone, even focus on wines from a single country.
+
+
+Region Analysis:
+
+```{r}
+wine_region_1 <- clean_wine_data %>% group_by(region_1) %>% summarise(total=n()) %>% 
+  arrange(desc(total)) %>% 
+  mutate(totpcnt = round(total/ sum(total), 7), accum = cumsum(totpcnt))
+
+wine_region_1
+```
+
+
+```{r}
+# Factor the taster name on desc order for organizing the bars on the next plot
+wine_region_1$region_1 <- factor(wine_region_1$region_1, levels = wine_region_1$region_1[order(-wine_region_1$total)])
+
+# Select the top ten regions
+top_ten_regions <- head(wine_region_1, 10)
+
+# Print a plot with the top ten regions and number of reviews
+top_ten_regions %>% ggplot(aes(x = region_1, y = total)) +
+  geom_col(fill = "maroon") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  geom_text(aes(label = sprintf("%.f%%", 100 * totpcnt), y = total + 2000)) +
+  labs(x = "Region", y = "Total Wine Reviews", title = "Total Reviews by Region")
+```
+
+WINERY ANALYSIS:
+
+```{r}
+wine_winery <- clean_wine_data %>% group_by(winery) %>% summarise(total=n()) %>% 
+  arrange(desc(total)) %>% 
+  mutate(totpcnt = round(total/ sum(total), 7), accum = cumsum(totpcnt))
+
+wine_winery
+```
+
+```{r}
+# Factor the taster name on desc order for organizing the bars on the next plot
+wine_winery$winery <- factor(wine_winery$winery, levels = wine_winery$winery[order(-wine_winery$total)])
+
+# Select the top ten regions
+top_ten_wineries<- head(wine_winery, 10)
+
+# Print a plot with the top ten regions and number of reviews
+top_ten_wineries %>% ggplot(aes(x = winery, y = total)) +
+  geom_col(fill = "blue") +
+  theme_minimal() +theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))+labs(x = "Winery", y = "Total Wine Reviews", title = "Total Reviews by Winery")
+```
+
+
+
+
+Numerical Variable Analysis
+
+```{r}
+summary(clean_wine_data$points)
+```
+
+```{r}
+library(ggplot2)
+ggplot(data = clean_wine_data, aes(x= points, colour = I('black'), fill = I('#099DD9')))+
+  geom_histogram(binwidth = 1) + theme_minimal() + labs(x = "Points(scores/ratings)", y= "Frequency", title = "Distribution of points(scores/ratings)")
+```
+The points given to the wines are normally distributed.
+
+"How many wines score a perfect score?"
+```{r}
+sum(clean_wine_data$points == 100)
+```
+
+```{r}
+summary(clean_wine_data$price)
+```
+
+```{r}
+ggplot(data = clean_wine_data, aes(x= price, colour = I('black'), fill = I('#099DD9')))+
+  geom_histogram()+theme_minimal()+
+  labs(x = "Price", y= "Frequency", title = "Distribution of prices") 
+```
+
+Strongly right skewed. We need to normalize this data
+
+```{r}
+# Log
+ggplot(data = clean_wine_data, aes(x= log(price), colour = I('black'), fill = I('#099DD9')))+
+  geom_histogram()+theme_minimal()+labs(x = "log(Price)", y= "Frequency", title = "Distribution of log(prices)") 
+```
+slightly right skewed
+
+Top 30 varieties reviewed
+
+```{r}
+library(dplyr)
+top30_wine_data <- clean_wine_data %>%
+  group_by(variety) %>%
+  summarise(count = n())%>%
+  arrange(desc(count))
+
+top30_wine_data <- top30_wine_data[1:30,1:2]
+
+top30_wine_data
+```
+
+TAKING A SAMPLE OF DATASET FOR FUTHER ANALYSIS AND MODEL BUILDING:
+
+
+The most reviewd 30 varieties are displayed above. I will limit the dataset that I will perform the rest of the EDA on to these varieties only.
+
+
+```{r}
+top30_wine <- top30_wine_data$variety  
+
+new_wine_data <- subset(clean_wine_data, variety %in% top30_wine)
+
+new_wine_data
+```
+
+```{r}
+new_wine_data$wine_type <- ifelse(new_wine_data$variety == "Chardonnay" | new_wine_data$variety == "Riesling" | new_wine_data$variety == "Sauvignon Blanc" | new_wine_data$variety == "White Blend" | new_wine_data$variety == "Sparkling Blend" | new_wine_data$variety == "Pinot Gris" | new_wine_data$variety == "Champagne Blend" | new_wine_data$variety == "GrÃ¼ner Veltliner" | new_wine_data$variety == "Pinot Grigio" | new_wine_data$variety == "Portuguese White" | new_wine_data$variety == "Viognier" | new_wine_data$variety == "GewÃ¼rztraminer" | new_wine_data$variety == "GewÃ¼rztraminer", "White Wine", "Red Wine")
+
+new_wine_data
+```
+
+```{r}
+new_wine_data %>%
+  group_by(variety, wine_type) %>%
+  summarise(n=n(),
+            avg_score = mean(points),
+            avg_price = mean(price)) %>%
+  ggplot(aes(x=avg_price, y= avg_score, size = n, colour = wine_type))+
+  geom_point()+ theme_minimal()+scale_color_manual(values = c("#FF8C00", "#000080"))
+```
+Checking correlations:
+
+```{r}
+cor(log(new_wine_data$price), new_wine_data$points)
+```
+
+```{r}
+new_wine_data_corr<-new_wine_data
+new_wine_data$region_1<- as.factor((new_wine_data_corr$region_1))
+new_wine_data$country<- as.factor((new_wine_data_corr$country))
+new_wine_data$wine_type<- as.factor((new_wine_data_corr$wine_type))
+```
+
+```{r}
+# Perform ANOVA test
+anova_result1 <- aov(price ~ wine_type, data = new_wine_data_corr)
+
+# Check the ANOVA summary
+summary(anova_result1)
+```
+
+```{r}
+# Perform ANOVA test
+anova_result2 <- aov(points ~ wine_type, data = new_wine_data_corr)
+
+# Check the ANOVA summary
+summary(anova_result2)
+```
+
+```{r}
+# Perform ANOVA test
+anova_result3 <- aov(price ~ country, data = new_wine_data_corr)
+
+# Check the ANOVA summary
+summary(anova_result3)
+```
+
+CORRELATION BETWEEN REGION AND WINE TYPE:
+
+```{r}
+# Install and load the 'vcd' package
+library(vcd)
+
+# Create a contingency table for the two categorical variables
+cont_table <- table(new_wine_data_corr$wine_type, new_wine_data_corr$region_1)
+
+# Calculate Cramér's V
+cramer_v <- assocstats(cont_table)$cramer
+
+# Print the correlation value
+print(cramer_v)
+```
+
+CORRELATION BETWEEN WINERY AND WINE TYPE:
+
+```{r}
+# Install and load the 'vcd' package
+library(vcd)
+
+# Create a contingency table for the two categorical variables
+cont_table <- table(new_wine_data_corr$wine_type, new_wine_data_corr$winery)
+
+# Calculate Cramér's V
+cramer_v <- assocstats(cont_table)$cramer
+
+# Print the correlation value
+print(cramer_v)
+```
+
+Plotting the wine_type, points and price:
+
+```{r}
+p5 <- ggplot(data = subset(new_wine_data, wine_type == "Red Wine"), aes(x=points, y= price))+
+  geom_point(colour="#FF8C00")+
+  scale_y_log10()+
+  geom_smooth()+ theme_minimal() +labs(title="Red Wine")
+
+p6 <- ggplot(data = subset(new_wine_data, wine_type == "White Wine"), aes(x=points, y= price))+
+  geom_point(colour="#000080")+
+  scale_y_log10()+
+  geom_smooth()+ theme_minimal() + labs(title="White Wine")
+
+library(gridExtra)
+grid.arrange(p5, p6, nrow=1)
+```
+
+```{r}
+clean_wine_data %>%
+  ggplot(aes(x=points, y=price)) + 
+  geom_point(position="jitter", alpha=1/10) + 
+  geom_smooth(method="lm", se=F)+ theme_minimal()
+```
+
+
+```{r}
+clean_wine_data %>% mutate(price=log(price))%>%
+  ggplot(aes(x=points, y=price)) + 
+  geom_point(position="jitter", alpha=1/10) + 
+  geom_smooth(method="lm", se=F)+theme_minimal()
+```
+
+
+LINEAR MODEL:
+
+```{r}
+Linear_wine_data=select(new_wine_data, c(5,6,15))%>%mutate(wine_type = as.factor(wine_type))%>%mutate(price = log(price))
+# Select 70% of the data for training
+wine_train_index <- sample(nrow(Linear_wine_data), 0.7 * nrow(Linear_wine_data))  
+wine_train_data <- Linear_wine_data[wine_train_index, ]
+wine_test_data <- Linear_wine_data[-wine_train_index, ]
+```
+
+```{r}
+RM_wine=lm(points~.,data=wine_train_data)
+```
+
+```{r}
+summary(RM_wine)
+```
+
+
+```{r}
+plot(RM_wine)
+```
+
+```{r}
+wine_rating_pred=predict(RM_wine, wine_test_data)
+wine_test_data$wine_rating_pred=wine_rating_pred
+```
+
+```{r}
+library(MLmetrics)
+Error=MAPE(wine_test_data$wine_rating_pred, wine_test_data$points)
+Error
+```
+
+```{r}
+LM_Accuracy= (1-Error)*100
+LM_Accuracy
+```
+
+CHECKING THE GOODNESS OF THE LINEAR MODEL:
+
+```{r}
+# Print the model summary
+summary(RM_wine)
+```
+
+```{r}
+# Assess the goodness of fit
+# R-squared
+r_squared <- summary(RM_wine)$r.squared
+cat("R-squared:", r_squared, "\n")
+```
+
+
+```{r}
+# Adjusted R-squared
+adjusted_r_squared <- summary(RM_wine)$adj.r.squared
+cat("Adjusted R-squared:", adjusted_r_squared, "\n")
+
+```
+
+
+```{r}
+# Residual analysis
+# Plotting residuals vs. predicted values
+plot(RM_wine$fitted.values, RM_wine$residuals, xlab = "Fitted Values", ylab = "Residuals")
+```
+
+
+```{r}
+
+# Hypothesis testing
+# Check the significance of coefficients
+coefficient_table <- coef(summary(RM_wine))
+p_values <- coefficient_table[, "Pr(>|t|)"]
+significant_variables <- names(p_values[p_values < 0.05])
+cat("Significant variables:", significant_variables, "\n")
+```
+```{r}
+# Predictive performance
+# Calculate mean squared error (MSE)
+predicted_values <- predict(RM_wine, newdata = wine_test_data)
+mse <- mean((predicted_values - wine_test_data$points)^2)
+cat("Mean Squared Error (MSE):", mse, "\n")
+```
+
+
+DECISON TREE
+
+```{r}
+new_wine_data
+```
+
+
+```{r}
+library(rpart)
+DT_wine_data=select(new_wine_data, c(5,6,15,8,14))
+DT_wine_data$price <- log(DT_wine_data$price)
+DT_wine_data$wine_type <- as.factor((DT_wine_data$wine_type))
+DT_wine_data$region_1<- as.numeric(as.factor((DT_wine_data$region_1)))
+DT_wine_data$winery<- as.numeric(as.factor((DT_wine_data$winery)))
+```
+
+```{r}
+# Select 70% of the data for training
+wine_train_index3 <- sample(nrow(DT_wine_data), 0.7 * nrow(DT_wine_data))  
+wine_train_data3 <- DT_wine_data[wine_train_index3, ]
+wine_test_data3 <- DT_wine_data[-wine_train_index3, ]
+```
+
+```{r}
+# Fit the random forest model with log-transformed price
+library(ISLR)
+library(rpart)
+DT <- rpart(wine_type ~.,data = wine_train_data3, control=rpart.control(cp=.00001))
+```
+
+Pruning:
+JUST TAKING SUBSET (i.e, adjusting cp value):
+
+```{r}
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+
+# Prune the decision tree to a desired complexity
+pruned_DT <- prune(DT, cp = 0.002)  # Adjust the cp value as per your requirement
+
+# Plot the pruned decision tree
+prp(pruned_DT)
+```
+
+
+```{r}
+predictions <- predict(DT, newdata = wine_test_data3, type = "class")
+```
+
+
+```{r}
+DT_confusion_matrix <- table(predictions, wine_test_data3$wine_type)
+DT_confusion_matrix
+```
+
+```{r}
+DT_Accuracy=sum(diag(DT_confusion_matrix)/sum(DT_confusion_matrix))*100
+DT_Accuracy
+```
+
+CHECKING THE GOODNESS OF THE DECISION TREE MODEL:
+
+```{r}
+
+# Make predictions on test data
+test_data <- wine_test_data3
+predicted <- predict(DT, newdata = test_data, type = "class")
+actual <- test_data$wine_type
+```
+
+```{r}
+
+# Confusion matrix
+conf_matrix <- table(actual, predicted)
+cat("Confusion Matrix:\n")
+print(conf_matrix)
+```
+
+```{r}
+# Accuracy
+accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+cat("Accuracy:", accuracy, "\n")
+```
+
+
+
+RANDOM FOREST:
+
+```{r}
+new_wine_data
+```
+
+
+```{r}
+RFM_wine_data=select(new_wine_data, c(15,5,6,2,14,8))
+RFM_wine_data$price <- log(RFM_wine_data$price)
+RFM_wine_data$wine_type <- as.factor((RFM_wine_data$wine_type))
+RFM_wine_data$winery<- as.numeric(as.factor((RFM_wine_data$winery)))
+RFM_wine_data$region_1 <- as.numeric(as.factor((RFM_wine_data$region_1)))
+```
+
+```{r}
+# Select 70% of the data for training
+wine_train_index1 <- sample(nrow(RFM_wine_data), 0.7 * nrow(RFM_wine_data))  
+wine_train_data1 <- RFM_wine_data[wine_train_index1, ]
+wine_test_data1 <- RFM_wine_data[-wine_train_index1, ]
+```
+
+
+
+```{r}
+# Fit the random forest model with log-transformed price
+library(randomForest)
+RFM <- randomForest(wine_type ~., data = wine_train_data1)
+```
+
+
+
+```{r}
+wine_type_pred=predict(RFM, wine_test_data1)
+wine_test_data1$wine_type_pred=wine_type_pred
+```
+
+
+```{r}
+RFM_confusion_matrix=table(wine_test_data1$wine_type,wine_test_data1$wine_type_pred)
+RFM_confusion_matrix
+```
+
+```{r}
+Accuracy_RFM=sum(diag(RFM_confusion_matrix)/sum(RFM_confusion_matrix))*100
+Accuracy_RFM
+```
+
+CHECKING THE GOODNESS OF THE RANDOM FOREST MODEL:
+
+
+```{r}
+# Out-of-bag (OOB) error estimate
+oob_error <- RFM$err.rate[nrow(RFM$err.rate), "OOB"]
+cat("OOB Error:", oob_error, "\n")
+
+```
+
+```{r}
+# Variable importance
+var_importance <- RFM$importance
+cat("Variable Importance:\n")
+print(var_importance)
+```
+
+```{r}
+varImpPlot(RFM)
+```
+
+
+```{r}
+# Make predictions on test data
+test_data <- wine_test_data1
+predicted <- predict(RFM, newdata = test_data)
+actual <- test_data$wine_type
+```
+
+
+
+```{r}
+# Evaluate prediction accuracy
+# For classification problems
+accuracy <- mean(predicted == actual)
+precision <- sum(predicted == "White Wine" & actual == "White Wine") / sum(predicted == "White Wine")
+recall <- sum(predicted == "White Wine" & actual == "White Wine") / sum(actual == "White Wine")
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", f1_score, "\n")
+```
+
+CLUSTERING :
+
+```{r}
+#Clustering
+wssplot=function(data, nc=15, seed=1234)
+{
+  wss= (nrow(data) -1)* sum(apply(data, 2, var))
+  for (i in 2:nc){
+    set.seed(seed)
+    wss[i] = sum(kmeans(data, centers= i) $withinss)
+  }
+  plot(1:nc, wss, type="b", xlab="Number of Clusters", ylab="within clusters sum of squares")
+}
+```
+
+```{r}
+Cluster_data=select(new_wine_data,country,points)%>%mutate(country= as.numeric(as.factor(country)))
+wssplot(Cluster_data)
+```
+
+```{r}
+library(stats)
+library(dplyr)
+library(ggplot2)
+library(ggfortify)
+KM2=(kmeans(Cluster_data,2))
+autoplot(KM2, Cluster_data, frame=T)
+```
