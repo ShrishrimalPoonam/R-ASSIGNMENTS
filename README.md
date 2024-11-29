@@ -11,3 +11,6 @@
 
 **<div align = "justify">3. CEO Departures</div>**
 <div align = "justify">The goal here is to analyze the dynamics of CEO departures in an organization and identify the contributing factors to enhance organizational resilience, strengthen stakeholder confidence, and ensure long-term success in a dynamic business environment. </div>
+
+**<div align = "justify">3. CEO Departures</div>**
+<div align = "justify">The objective of this study is to perform an in-depth exploration of the wine reviews dataset to identify key factors that contribute to the success and excellence of wines. By leveraging data analysis and machine learning techniques, the study aims to develop precise predictive models that provide valuable insights and recommendations for wine enthusiasts, experts, and businesses in the wine industry.</div>
